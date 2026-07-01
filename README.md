@@ -1,6 +1,6 @@
-﻿# Desktop Source Updater
+# Desktop App Source Updater
 
-`desktop_source_updater` is a small stdlib-only updater for Python desktop apps that ship a stable launcher plus updateable source code beside it.
+`desktop_app_source_updater` is a small stdlib-only updater for Python desktop apps that ship a stable launcher plus updateable source code beside it.
 
 It is meant for apps with this shape:
 
@@ -17,7 +17,7 @@ The updater checks a GitHub Release asset such as `my_app_update_v1.2.3.zip`, va
 Call the updater before importing the app runtime:
 
 ```python
-from desktop_source_updater import UpdateConfig, format_update_message, run_startup_update
+from desktop_app_source_updater import UpdateConfig, format_update_message, run_startup_update
 
 config = UpdateConfig(
     app_name="my_app",
@@ -54,7 +54,7 @@ The manifest includes the target version, compatible source versions, payload ha
 From an app repository:
 
 ```powershell
-python -m desktop_source_updater.build_update_asset `
+python -m desktop_app_source_updater.build_update_asset `
   --app-name my_app `
   --runtime-path my_app_src `
   --from-ref v1.2.0 `
@@ -70,6 +70,6 @@ The command refuses to build a source-only update if dependency, packaging, buil
 ## Development
 
 ```powershell
-python -m unittest
-python -m py_compile src\desktop_source_updater\*.py
+python -m unittest discover -s tests
+python -m compileall -q desktop_app_source_updater
 ```

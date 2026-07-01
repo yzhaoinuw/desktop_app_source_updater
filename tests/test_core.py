@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from desktop_source_updater import UpdateConfig, run_startup_update
+from desktop_app_source_updater import UpdateConfig, run_startup_update
 
 
 def sha256(data):

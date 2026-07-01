@@ -1,81 +1,110 @@
-﻿# Desktop Source Updater Handoff
+# Guidelines and Tips for Agents
 
-Read this file first in future Codex sessions for this repository.
+Read this file first when joining this repo. Keep it short, then open the other
+docs only when the task needs them.
 
 ## Purpose
 
-This repository owns a reusable stdlib-only updater for Python desktop apps that have a stable launcher, such as `run_desktop_app.py`, and import the real app code from an adjacent source folder such as `src/`, `app_src/`, `fp_analysis_app/`, or similar.
+`desktop_app_source_updater` is a standard-library-only updater for Python
+desktop apps with a stable launcher and updateable source code beside it. It
+applies custom GitHub Release zip assets before the downstream app imports.
 
-The updater is for code-only updates delivered as custom GitHub Release zip assets. It is not an installer, dependency resolver, or full packaged-app replacement mechanism.
+This is for code-only updates. It is not an installer, dependency resolver, or
+full packaged-app replacement mechanism.
+
+## Runtime
+
+Use Python 3.10 or newer. This shell may not have `python` on PATH; this known
+working interpreter is fine for local checks:
+
+```powershell
+$py = "C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe"
+```
+
+The package lives directly at `desktop_app_source_updater/`.
+
+No runtime dependencies are configured beyond the Python standard library. Do
+not add dependencies, formatters, linters, or pre-commit as drive-by churn.
+
+## Common Commands
+
+Run tests:
+
+```powershell
+& $py -m unittest discover -s tests
+```
+
+Run the current verification set:
+
+```powershell
+& $py -m unittest discover -s tests
+& $py -m compileall -q desktop_app_source_updater
+& $py -m desktop_app_source_updater.build_update_asset --help
+```
+
+There is no standalone desktop app in this repo. Manual testing happens by
+wiring the package into a downstream app and building an update zip there.
 
 ## Runtime Contract
 
-The runtime API lives in `src/desktop_source_updater/core.py` and is exported from `src/desktop_source_updater/__init__.py`.
+Public API is exported from `desktop_app_source_updater/__init__.py`;
+implementation lives in `desktop_app_source_updater/core.py`.
 
-The intended launcher pattern is:
+Downstream launchers should:
 
-1. Compute the launcher/app root.
-2. Put that root on `sys.path` if the app uses an adjacent source folder.
-3. Call `run_startup_update(UpdateConfig(...))` before importing the app runtime.
-4. Print or display `format_update_message(result)` if non-empty.
-5. Import and launch the app normally.
+1. Compute the app root.
+2. Add the app root to `sys.path` if needed.
+3. Call `run_startup_update(UpdateConfig(...))` before importing app runtime.
+4. Display `format_update_message(result)` when it returns text.
+5. Import and launch normally.
 
-The updater must stay conservative:
+The updater must:
 
-- Apply only manifest-listed files whose paths match `allowed_payload_paths`.
-- Refuse blocked dependency, packaging, build, or local-data path changes.
-- Verify the current installed file hash against the manifest baseline for the detected installed version.
-- Support jump-ahead updates from multiple compatible previous versions through `previous_sha256_by_version`.
-- Skip or block safely instead of overwriting unknown local edits.
-- Depend only on the Python standard library unless a future maintainer explicitly changes the project scope.
+- apply only manifest-listed files under `allowed_payload_paths`
+- block dependency, packaging, build, cache, archive, and local-data paths
+- verify installed files against manifest baseline hashes
+- support jump-ahead updates with `previous_sha256_by_version`
+- skip or block rather than overwrite unknown local edits
+- keep downstream paths and environment variable names configurable
 
 ## Builder Contract
 
-The update-asset builder lives in `src/desktop_source_updater/build_update_asset.py` and is exposed as:
+The builder lives in `desktop_app_source_updater/build_update_asset.py` and runs as:
 
 ```powershell
-python -m desktop_source_updater.build_update_asset
+python -m desktop_app_source_updater.build_update_asset
 ```
 
-It should be run from an app repository, not necessarily this repository. It reads Git refs, builds a custom source update zip, and supports repeated `--from-ref` values so one latest release asset can update users who skipped compatible releases.
+Run it from a downstream app repo. It reads Git refs, accepts repeated
+`--from-ref` values, writes a source-update zip, and refuses source-only assets
+when dependency, packaging, build, cache, archive, local-data, deletion, rename,
+or complex runtime changes require a packaged refresh.
 
-If dependency or packaging files changed between any `--from-ref` and `--to-ref`, the builder should refuse to create a source-only update asset.
+## Docs Map
 
-## Verification
+- `project_overview.md`: active file map and mental model
+- `next_steps.md`: current adoption follow-ups
+- `work_log.md`: newest session notes and verification breadcrumbs
+- `README.md`: user-facing usage and release asset format
+- `pyproject.toml`: package metadata and console script
+- `tests/`: runtime and builder behavior coverage
 
-Use these checks after substantive changes:
+Update `work_log.md` after substantive work unless the user asks not to. Update
+`next_steps.md` when concrete future work changes.
+
+## Git
+
+This checkout may report dubious ownership. For read-only checks, prefer:
 
 ```powershell
-python -m unittest
-python -m py_compile src\desktop_source_updater\*.py
-python -m desktop_source_updater.build_update_asset --help
+git -c safe.directory=C:/path/to/this/repo status --short --branch
 ```
 
-No formatter or linter is configured yet. Do not add one as drive-by churn unless the user asks.
+Only add a global safe-directory entry if the user explicitly asks.
 
-## Adoption Notes
+## Reminders
 
-For a downstream app, the minimal app-specific choices are:
-
-- `app_name`
-- `release_api_url`
-- `asset_prefix`
-- `installed_version_file` or explicit `installed_version`
-- `allowed_payload_paths`
-- optional app-specific environment variable names
-
-Do not assume every app uses `fp_analysis_app/`; keep path and env names configurable.
-
-## Current Follow-Up
-
-Before broad adoption, test this package in at least two real desktop apps. The first known source is `C:\Users\yzhao\python_projects\fp_analysis`, where the prototype originated.
-## Windows Git Note
-
-If Git reports dubious ownership for this checkout, use a per-command safe-directory override for read-only checks:
-
-```powershell
-git -c safe.directory=C:/Users/yzhao/python_projects/desktop_source_updater status --short --branch
-```
-
-Only add a global safe-directory entry if the user explicitly asks for it.
-
+- Keep source updates conservative and code-only.
+- Preserve local-edit protection through known baseline hashes.
+- Preserve multi-version jump-ahead support.
+- `fp_analysis` is the prototype source, not a hard-coded target.

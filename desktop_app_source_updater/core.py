@@ -234,7 +234,7 @@ def _read_url_bytes(url: str, timeout_seconds: int, max_update_bytes: int) -> by
         else:
             request = urllib.request.Request(
                 url,
-                headers={"Accept": "application/octet-stream", "User-Agent": "desktop-source-updater"},
+                headers={"Accept": "application/octet-stream", "User-Agent": "desktop-app-source-updater"},
             )
             try:
                 with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
@@ -455,5 +455,3 @@ def _sha256_file(path: Path) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
