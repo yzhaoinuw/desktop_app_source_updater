@@ -10,6 +10,13 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-07-01
 
+### Expanded README adoption guide (Codex GPT-5)
+
+- Rewrote `README.md` to explain how human maintainers and agents adopt the updater in an existing app without cloning or vendoring it.
+- Added GitHub dependency installation, launcher wiring, first-full-release rule, source-update asset publishing steps, test checklist, troubleshooting notes, and a pasteable agent prompt.
+- Verification:
+  - Inspected `README.md` content after rewrite.
+
 ### Added treaty adoption badge (Codex GPT-5)
 
 - Added the centrally hosted tri-color Agent Collab Treaty adoption badge to the top of `README.md`.
