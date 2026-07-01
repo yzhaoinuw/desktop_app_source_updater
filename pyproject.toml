@@ -1,0 +1,26 @@
+﻿[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "desktop-source-updater"
+version = "0.1.0"
+description = "Code-only release-zip updater for Python desktop apps with stable launchers."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Yue Zhao" }]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = []
+
+[project.scripts]
+desktop-source-update-asset = "desktop_source_updater.build_update_asset:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
