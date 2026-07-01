@@ -10,6 +10,12 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-07-01
 
+### Added treaty adoption badge (Codex GPT-5)
+
+- Added the centrally hosted tri-color Agent Collab Treaty adoption badge to the top of `README.md`.
+- Verification:
+  - Inspected `README.md` to confirm the badge markdown is present and points to the treaty repository.
+
 ### Configured GitHub origin for renamed project (Codex GPT-5)
 
 - Added local `origin` remote for `https://github.com/yzhaoinuw/desktop_app_source_updater.git`.

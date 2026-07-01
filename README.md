@@ -1,5 +1,7 @@
 # Desktop App Source Updater
 
+[![Agent Collab Treaty](https://raw.githubusercontent.com/yzhaoinuw/agent_collab_treaty/main/assets/treaty-adopted.svg)](https://github.com/yzhaoinuw/agent_collab_treaty)
+
 `desktop_app_source_updater` is a small stdlib-only updater for Python desktop apps that ship a stable launcher plus updateable source code beside it.
 
 It is meant for apps with this shape:
