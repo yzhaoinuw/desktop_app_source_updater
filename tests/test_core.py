@@ -2,8 +2,10 @@
 import json
 import unittest
 import zipfile
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from desktop_app_source_updater import UpdateConfig, run_startup_update
 
@@ -157,6 +159,42 @@ class TestStartupUpdate(unittest.TestCase):
             result = run_startup_update(fixture.config(release_metadata=metadata))
 
             self.assertEqual("updated", result.status)
+
+    def test_http_metadata_requests_json_and_asset_requests_binary(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            update_zip = fixture.build_update_zip()
+            asset_url = "https://downloads.example.test/demo_app_update_v1.0.1.zip"
+            metadata = {
+                "tag_name": "v1.0.1",
+                "assets": [
+                    {"name": update_zip.name, "browser_download_url": asset_url}
+                ],
+            }
+            config = UpdateConfig(
+                app_name="demo_app",
+                app_root=fixture.app_root,
+                installed_version_file="demo_src/__init__.py",
+                release_api_url="https://api.example.test/repos/demo/releases/latest",
+                asset_prefix="demo_app_update_",
+                allowed_payload_paths=("demo_src/",),
+            )
+
+            with patch(
+                "desktop_app_source_updater.core.urllib.request.urlopen",
+                side_effect=[
+                    BytesIO(json.dumps(metadata).encode("utf-8")),
+                    BytesIO(update_zip.read_bytes()),
+                ],
+            ) as urlopen:
+                result = run_startup_update(config)
+
+            self.assertEqual("updated", result.status)
+            requests = [call.args[0] for call in urlopen.call_args_list]
+            self.assertEqual("application/vnd.github+json", requests[0].get_header("Accept"))
+            self.assertEqual("application/octet-stream", requests[1].get_header("Accept"))
 
     def test_blocks_unallowed_dependency_path(self):
         with TemporaryDirectory() as temp_dir:

@@ -18,6 +18,8 @@ from typing import Any
 DEFAULT_TIMEOUT_SECONDS = 6
 DEFAULT_MAX_UPDATE_BYTES = 80 * 1024 * 1024
 MANIFEST_NAME = "manifest.json"
+RELEASE_METADATA_ACCEPT = "application/vnd.github+json"
+UPDATE_ASSET_ACCEPT = "application/octet-stream"
 
 DEFAULT_BLOCKED_PATH_NAMES = frozenset(
     {
@@ -198,7 +200,14 @@ def _resolve_update_url(config: UpdateConfig, timeout_seconds: int) -> str:
         return ""
 
     try:
-        release = json.loads(_read_url_bytes(api_url, timeout_seconds, config.max_update_bytes).decode("utf-8"))
+        release = json.loads(
+            _read_url_bytes(
+                api_url,
+                timeout_seconds,
+                config.max_update_bytes,
+                accept=RELEASE_METADATA_ACCEPT,
+            ).decode("utf-8")
+        )
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise UpdateError(f"could not read update release metadata: {exc}") from exc
 
@@ -223,7 +232,13 @@ def _is_update_asset_name(name: str, asset_prefix: str) -> bool:
     return name.startswith(asset_prefix) and name.lower().endswith(".zip")
 
 
-def _read_url_bytes(url: str, timeout_seconds: int, max_update_bytes: int) -> bytes:
+def _read_url_bytes(
+    url: str,
+    timeout_seconds: int,
+    max_update_bytes: int,
+    *,
+    accept: str = UPDATE_ASSET_ACCEPT,
+) -> bytes:
     local_path = Path(url)
     if local_path.exists():
         data = local_path.read_bytes()
@@ -234,7 +249,7 @@ def _read_url_bytes(url: str, timeout_seconds: int, max_update_bytes: int) -> by
         else:
             request = urllib.request.Request(
                 url,
-                headers={"Accept": "application/octet-stream", "User-Agent": "desktop-app-source-updater"},
+                headers={"Accept": accept, "User-Agent": "desktop-app-source-updater"},
             )
             try:
                 with urllib.request.urlopen(request, timeout=timeout_seconds) as response:

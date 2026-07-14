@@ -8,6 +8,24 @@ If today's date already has a `## YYYY-MM-DD` header at the top, add a new `###`
 
 Update this log at the end of any substantive work session unless the user explicitly asks not to document it. Substantive work includes file edits, meaningful validation or debugging, technical decisions or reversals, reusable discoveries, branch/PR/release state changes, or follow-up work that future agents need. Log useful experiments even when the code was reverted; skip casual Q&A, trivial one-off commands, and pure scratch work with no future coordination value.
 
+## 2026-07-14
+
+### Fixed GitHub release metadata requests (Codex GPT-5, default mode)
+
+- Fixed startup update discovery to request GitHub release metadata as JSON
+  while continuing to request update assets as binary content.
+- Added regression coverage for both HTTP media types so a shared download
+  helper cannot silently send an asset-only header to the metadata endpoint.
+- The affected `sleep_scoring` v0.16.5 GitHub Release was revoked before the
+  fix; its replacement full package remains gated on downstream packaged-app
+  verification.
+- Verification:
+  - `python -m unittest discover -s tests`: 8 tests passed.
+  - `python -m compileall -q desktop_app_source_updater`: passed.
+  - `python -m desktop_app_source_updater.build_update_asset --help`: passed.
+  - A real anonymous request to the `sleep_scoring` latest-release endpoint
+    returned `up-to-date` instead of HTTP 415.
+
 ## 2026-07-01
 
 ### Expanded README adoption guide (Codex GPT-5)
