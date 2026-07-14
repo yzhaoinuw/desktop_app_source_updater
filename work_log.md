@@ -10,6 +10,20 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-07-14
 
+### Updated Agent Collab Treaty to v0.3.3 (Codex GPT-5, default mode)
+
+- Updated the Copier treaty pin from `v0.3.2` to `v0.3.3` while preserving the
+  enabled tri-color adoption badge.
+- Resolved the expected whole-file `AGENTS.md` conflict, then condensed the
+  project-specific guide from 133 to 73 lines while retaining the new release,
+  workstation-date, and badge safeguards.
+- Verification:
+  - `treaty validate .`: passed.
+  - `python -m unittest discover -s tests`: 8 tests passed.
+  - `python -m compileall -q desktop_app_source_updater`: passed.
+  - `python -m desktop_app_source_updater.build_update_asset --help`: passed.
+  - `git diff --cached --check`: passed.
+
 ### Fixed GitHub release metadata requests (Codex GPT-5, default mode)
 
 - Fixed startup update discovery to request GitHub release metadata as JSON

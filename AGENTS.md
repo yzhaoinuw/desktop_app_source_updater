@@ -1,40 +1,25 @@
 # Guidelines and Tips for Agents
 
-Read this file first when joining this repo. Keep it short, then open the other
-docs only when the task needs them.
+Read this file first when joining the repo. Open the linked docs only when the
+task needs them.
 
 ## Purpose
 
 `desktop_app_source_updater` is a standard-library-only updater for Python
-desktop apps with a stable launcher and updateable source code beside it. It
-applies custom GitHub Release zip assets before the downstream app imports.
+desktop apps. A stable launcher applies code-only GitHub Release zip assets
+before importing the updateable application source beside it.
 
-This is for code-only updates. It is not an installer, dependency resolver, or
-full packaged-app replacement mechanism.
+It is not an installer, dependency resolver, or packaged-app replacement.
 
-## Runtime
+## Runtime and Verification
 
-Use Python 3.10 or newer. This shell may not have `python` on PATH; this known
-working interpreter is fine for local checks:
+Use Python 3.10 or newer. This interpreter is known to work locally:
 
 ```powershell
 $py = "C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe"
 ```
 
-The package lives directly at `desktop_app_source_updater/`.
-
-No runtime dependencies are configured beyond the Python standard library. Do
-not add dependencies, formatters, linters, or pre-commit as drive-by churn.
-
-## Common Commands
-
-Run tests:
-
-```powershell
-& $py -m unittest discover -s tests
-```
-
-Run the current verification set:
+The package lives at `desktop_app_source_updater/`. Run:
 
 ```powershell
 & $py -m unittest discover -s tests
@@ -42,69 +27,47 @@ Run the current verification set:
 & $py -m desktop_app_source_updater.build_update_asset --help
 ```
 
-There is no standalone desktop app in this repo. Manual testing happens by
-wiring the package into a downstream app and building an update zip there.
+## Contracts
 
-## Runtime Contract
-
-Public API is exported from `desktop_app_source_updater/__init__.py`;
-implementation lives in `desktop_app_source_updater/core.py`.
-
-Downstream launchers should:
-
-1. Compute the app root.
-2. Add the app root to `sys.path` if needed.
-3. Call `run_startup_update(UpdateConfig(...))` before importing app runtime.
-4. Display `format_update_message(result)` when it returns text.
-5. Import and launch normally.
+Public API is exported from `desktop_app_source_updater/__init__.py`; the
+implementation is in `core.py`. Launchers call
+`run_startup_update(UpdateConfig(...))` before importing app runtime, display
+`format_update_message(result)` when nonempty, then launch normally.
 
 The updater must:
 
 - apply only manifest-listed files under `allowed_payload_paths`
 - block dependency, packaging, build, cache, archive, and local-data paths
-- verify installed files against manifest baseline hashes
-- support jump-ahead updates with `previous_sha256_by_version`
-- skip or block rather than overwrite unknown local edits
-- keep downstream paths and environment variable names configurable
+- verify baseline hashes and preserve unknown local edits
+- support jump-ahead updates through `previous_sha256_by_version`
 
-## Builder Contract
+The builder in `build_update_asset.py` accepts repeated `--from-ref` values
+and refuses source-only assets when changes require a packaged refresh.
 
-The builder lives in `desktop_app_source_updater/build_update_asset.py` and runs as:
-
-```powershell
-python -m desktop_app_source_updater.build_update_asset
-```
-
-Run it from a downstream app repo. It reads Git refs, accepts repeated
-`--from-ref` values, writes a source-update zip, and refuses source-only assets
-when dependency, packaging, build, cache, archive, local-data, deletion, rename,
-or complex runtime changes require a packaged refresh.
-
-## Docs Map
+## Docs and Session Hygiene
 
 - `project_overview.md`: active file map and mental model
 - `next_steps.md`: current adoption follow-ups
-- `work_log.md`: newest session notes and verification breadcrumbs
-- `README.md`: user-facing usage and release asset format
-- `pyproject.toml`: package metadata and console script
-- `tests/`: runtime and builder behavior coverage
+- `work_log.md`: recent work and verification
+- `README.md`: adoption, usage, and release asset format
 
-Update `work_log.md` after substantive work unless the user asks not to. Update
-`next_steps.md` when concrete future work changes.
+Update `work_log.md` after substantive work and `next_steps.md` when future
+work changes. Verify dated entries with `Get-Date -Format yyyy-MM-dd`; never
+write a future date. `treaty validate` enforces this.
 
-## Git
+Keep the tri-color treaty badge for GitHub; use shields.io only where raw SVG is blocked.
 
-This checkout may report dubious ownership. For read-only checks, prefer:
+## Git and Releases
 
-```powershell
-git -c safe.directory=C:/path/to/this/repo status --short --branch
-```
+For read-only Git checks, use a per-command `safe.directory` override; change global config only when asked.
 
-Only add a global safe-directory entry if the user explicitly asks.
+Before leaving a feature branch, confirm its changes are committed, verified,
+and merged or intentionally parked. Treat commit-plus-push-plus-tag requests as releases: update version/docs/work log,
+run verification, create the tag only after those gates pass, and confirm published branch and tag refs.
 
 ## Reminders
 
 - Keep source updates conservative and code-only.
-- Preserve local-edit protection through known baseline hashes.
-- Preserve multi-version jump-ahead support.
-- `fp_analysis` is the prototype source, not a hard-coded target.
+- Preserve local-edit and jump-ahead protections.
+- Keep downstream paths and environment variables configurable.
+- `fp_analysis` is a prototype source, not a hard-coded target.
