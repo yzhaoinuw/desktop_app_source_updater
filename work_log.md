@@ -17,14 +17,17 @@ Update this log at the end of any substantive work session unless the user expli
 - Added regression coverage for both HTTP media types so a shared download
   helper cannot silently send an asset-only header to the metadata endpoint.
 - The affected `sleep_scoring` v0.16.5 GitHub Release was revoked before the
-  fix; its replacement full package remains gated on downstream packaged-app
-  verification.
+  fix. Its replacement full package pinned this commit, passed the frozen
+  executable's online metadata check from a fresh extraction, and was
+  republished only after every remote asset digest matched the local files.
 - Verification:
   - `python -m unittest discover -s tests`: 8 tests passed.
   - `python -m compileall -q desktop_app_source_updater`: passed.
   - `python -m desktop_app_source_updater.build_update_asset --help`: passed.
   - A real anonymous request to the `sleep_scoring` latest-release endpoint
     returned `up-to-date` instead of HTTP 415.
+  - The final `sleep_scoring` package queried the republished public v0.16.5
+    metadata and printed `no update available`.
 
 ## 2026-07-01
 

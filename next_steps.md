@@ -19,6 +19,11 @@ but it still needs field validation inside real desktop app launch flows. The
 first known source is `C:\Users\yzhao\python_projects\fp_analysis`, where the
 prototype originated.
 
+Current field evidence: the frozen `sleep_scoring` v0.16.5 executable can query
+the real GitHub latest-release endpoint from a fresh package extraction. The
+first compatible `app_src` update still needs to prove the apply path from that
+baseline.
+
 Remaining work:
 
 - Wire the updater into the `fp_analysis` desktop launcher with app-specific
