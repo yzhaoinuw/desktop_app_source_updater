@@ -8,6 +8,30 @@ If today's date already has a `## YYYY-MM-DD` header at the top, add a new `###`
 
 Update this log at the end of any substantive work session unless the user explicitly asks not to document it. Substantive work includes file edits, meaningful validation or debugging, technical decisions or reversals, reusable discoveries, branch/PR/release state changes, or follow-up work that future agents need. Log useful experiments even when the code was reverted; skip casual Q&A, trivial one-off commands, and pure scratch work with no future coordination value.
 
+## 2026-07-22
+
+### Added multiple installed byte baselines to the asset builder (Codex GPT-5, default mode)
+
+- Added repeatable `--installed-baseline-manifest` inputs that describe exact
+  installed SHA-256 or missing-file states for versions already declared by
+  `--from-ref`.
+- Kept `previous_sha256_by_version` for unambiguous per-version states and used
+  the existing schema-1 `previous_sha256` list for deduplicated present-file
+  alternatives such as canonical LF and packaged CRLF bytes.
+- Made the builder refuse baseline combinations that need both missing-file
+  handling and multiple present-file hashes because schema 1 cannot represent
+  that combination safely.
+- Added end-to-end regression coverage showing that both legitimate byte
+  lineages update, an unknown local edit remains untouched, jump-ahead file
+  additions keep version-aware `null` baselines, and the unrepresentable case
+  fails closed.
+- Updated the adoption guide, project overview, and active next-step record for
+  GitHub issue #1 on `dev`.
+- Verification:
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m unittest discover -s tests -v`: 10 tests passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m compileall -q desktop_app_source_updater`: passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m desktop_app_source_updater.build_update_asset --help`: passed and listed `--installed-baseline-manifest`.
+
 ## 2026-07-14
 
 ### Updated Agent Collab Treaty to v0.3.3 (Codex GPT-5, default mode)

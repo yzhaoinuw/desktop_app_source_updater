@@ -55,6 +55,10 @@ External to this repository.
 - CLI entry point for building custom source update zips from an app repository.
 - Reads target and baseline files from Git refs with `git show`.
 - Supports repeated `--from-ref` values for jump-ahead compatibility.
+- Accepts repeatable installed-baseline hash manifests for legitimate byte
+  variants, including multiple present-file baselines reporting one version.
+- Preserves version-specific missing-file baselines and refuses schema-1 cases
+  that cannot safely represent both missing and multiple present states.
 - Refuses source-only assets when blocked path categories changed.
 - Refuses runtime deletions, renames, and complex changes because those need a
   packaged refresh.
@@ -138,7 +142,8 @@ The manifest schema version is currently `1`. Important fields include:
 - `from_versions`: compatible installed versions.
 - `changed_files`: changed runtime paths used for messages and policy checks.
 - `files`: payload entries with `path`, `sha256`, and preferably
-  `previous_sha256_by_version`.
+  `previous_sha256_by_version`; `previous_sha256` lists are used when a file
+  has multiple legitimate present-byte baselines.
 
 ## Practical Mental Model
 

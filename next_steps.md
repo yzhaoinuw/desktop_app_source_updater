@@ -5,10 +5,25 @@ threads that are actually in flight or likely to be resumed soon.
 
 ## Currently Hot
 
+- [Multiple installed byte baselines](#multiple-installed-byte-baselines-codex):
+  finish and publish the issue #1 builder enhancement.
 - [Downstream adoption validation](#downstream-adoption-validation-codex-gpt-5):
   prove the updater in at least two real desktop apps before broad adoption.
 
-No other active engineering threads are recorded right now.
+## Multiple Installed Byte Baselines (Codex)
+
+Status: implemented and verified on `dev`
+
+The builder now accepts repeatable exact-byte baseline manifests, keeps
+version-aware mappings for unambiguous states, and uses schema-1 accepted-hash
+lists for multiple legitimate present-file variants. It refuses combinations
+of missing and multiple present states that schema 1 cannot represent safely.
+
+Remaining work:
+
+- Review and commit the verified implementation.
+- Push the branch and open a pull request when requested.
+- Close GitHub issue #1 after the change is merged.
 
 ## Downstream Adoption Validation (Codex GPT-5)
 

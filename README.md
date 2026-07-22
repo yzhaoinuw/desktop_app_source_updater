@@ -161,12 +161,37 @@ python -m desktop_app_source_updater.build_update_asset `
   --from-ref v1.2.0 `
   --from-ref v1.2.1 `
   --from-ref v1.2.2 `
+  --installed-baseline-manifest release_baselines/v1.2.2-windows.json `
   --to-ref v1.2.3 `
   --version-file my_app_src/__init__.py `
   --asset-prefix my_app_update_
 ```
 
 Use one `--from-ref` for each previous release that should be able to jump to the new version. If the builder refuses because dependency or packaging paths changed, publish a full packaged release instead.
+
+Use repeatable `--installed-baseline-manifest` arguments when legitimate
+installations reporting the same version can contain different bytes, such as
+LF Git blobs and CRLF files from a Windows package. Each compact JSON manifest
+names a version already declared by `--from-ref` and maps every changed runtime
+path to its exact installed SHA-256. Use `null` only when that file was absent:
+
+```json
+{
+  "version": "v1.2.2",
+  "files": {
+    "my_app_src/app.py": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "my_app_src/new_module.py": null
+  }
+}
+```
+
+The builder deduplicates hashes and keeps version-specific baselines whenever
+each version has one known file state. When a file has multiple present-byte
+baselines, it emits the schema-1 `previous_sha256` accepted-hash list while
+`from_versions` remains the compatibility gate. Schema 1 cannot represent a
+changed path whose baseline set needs both a missing-file state and multiple
+present-file hashes, so the builder refuses that case instead of creating an
+unsafe or incomplete asset.
 
 ### 7. Upload The Zip To The App Release
 

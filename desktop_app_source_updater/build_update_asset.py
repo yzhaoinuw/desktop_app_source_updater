@@ -7,13 +7,21 @@ import re
 import subprocess
 import sys
 import zipfile
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from .core import (
     DEFAULT_BLOCKED_PATH_NAMES,
     DEFAULT_BLOCKED_PATH_PREFIXES,
     DEFAULT_BLOCKED_PATH_SUFFIXES,
 )
+
+
+@dataclass(frozen=True)
+class InstalledBaseline:
+    source: Path
+    version: str
+    files: dict[str, str | None]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,6 +33,16 @@ def main(argv: list[str] | None = None) -> int:
         from_ref: read_version_from_ref(repo, from_ref, args.version_file, args.version_pattern)
         for from_ref in from_refs
     }
+    from_versions = list(dict.fromkeys(from_versions_by_ref.values()))
+    installed_baselines = load_installed_baseline_manifests(args.installed_baseline_manifest)
+    unknown_baseline_versions = sorted(
+        {baseline.version for baseline in installed_baselines} - set(from_versions)
+    )
+    if unknown_baseline_versions:
+        raise SystemExit(
+            "Installed baseline versions must also be declared by --from-ref: "
+            + ", ".join(unknown_baseline_versions)
+        )
     asset_prefix = args.asset_prefix or f"{args.app_name}_update_"
     output = args.output or repo / "dist" / f"{asset_prefix}{version}.zip"
 
@@ -65,24 +83,31 @@ def main(argv: list[str] | None = None) -> int:
     payloads = {}
     for path in changed_runtime:
         current_bytes = git_file_bytes(repo, args.to_ref, path)
-        previous_sha256_by_version = {}
+        previous_states_by_version = {from_version: [] for from_version in from_versions}
         for from_ref, from_version in from_versions_by_ref.items():
             previous_bytes = git_file_bytes(repo, from_ref, path, allow_missing=True)
-            previous_sha256_by_version[from_version] = None if previous_bytes is None else sha256(previous_bytes)
-        manifest_files.append(
-            {
-                "path": path,
-                "sha256": sha256(current_bytes),
-                "previous_sha256_by_version": previous_sha256_by_version,
-            }
-        )
+            add_unique(
+                previous_states_by_version[from_version],
+                None if previous_bytes is None else sha256(previous_bytes),
+            )
+        for baseline in installed_baselines:
+            if path not in baseline.files:
+                raise SystemExit(
+                    f"Installed baseline manifest {baseline.source} does not describe changed file {path}; "
+                    "list its SHA-256 or null when the file was absent"
+                )
+            add_unique(previous_states_by_version[baseline.version], baseline.files[path])
+
+        manifest_file = {"path": path, "sha256": sha256(current_bytes)}
+        manifest_file.update(encode_previous_baselines(path, previous_states_by_version))
+        manifest_files.append(manifest_file)
         payloads[path] = current_bytes
 
     manifest = {
         "schema_version": 1,
         "app": args.app_name,
         "version": version,
-        "from_versions": list(from_versions_by_ref.values()),
+        "from_versions": from_versions,
         "changed_files": changed_runtime,
         "files": manifest_files,
     }
@@ -114,6 +139,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Previous release tag or commit users may have installed. Repeat for jump-ahead support.",
     )
+    parser.add_argument(
+        "--installed-baseline-manifest",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "JSON file describing an exact installed byte baseline. Repeat for multiple package or "
+            "source-patched baselines. Each manifest maps paths to SHA-256 strings or null."
+        ),
+    )
     parser.add_argument("--to-ref", default="HEAD", help="New release tag or commit to package. Defaults to HEAD.")
     parser.add_argument("--version", help="Target version string. Defaults to VERSION in --version-file at --to-ref.")
     parser.add_argument(
@@ -132,6 +167,88 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--blocked-path-prefix", action="append", help="Path prefix that requires full packaging. Repeat to override defaults.")
     parser.add_argument("--blocked-path-suffix", action="append", help="Path suffix that requires full packaging. Repeat to override defaults.")
     return parser.parse_args(argv)
+
+
+def load_installed_baseline_manifests(paths: list[Path]) -> list[InstalledBaseline]:
+    baselines = []
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise SystemExit(f"Could not read installed baseline manifest {path}: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Could not parse installed baseline manifest {path}: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise SystemExit(f"Installed baseline manifest {path} must contain a JSON object")
+        version = data.get("version")
+        if not isinstance(version, str) or not version:
+            raise SystemExit(f"Installed baseline manifest {path} must contain a non-empty string version")
+        raw_files = data.get("files")
+        if not isinstance(raw_files, dict):
+            raise SystemExit(f"Installed baseline manifest {path} must contain a files object")
+
+        files = {}
+        for raw_path, digest in raw_files.items():
+            if not isinstance(raw_path, str):
+                raise SystemExit(f"Installed baseline manifest {path} contains a non-string file path")
+            normalized = normalize_manifest_path(raw_path, path)
+            if normalized in files:
+                raise SystemExit(
+                    f"Installed baseline manifest {path} contains duplicate normalized path {normalized}"
+                )
+            if digest is not None and (
+                not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None
+            ):
+                raise SystemExit(
+                    f"Installed baseline manifest {path} must map {normalized} to a SHA-256 string or null"
+                )
+            files[normalized] = None if digest is None else digest.lower()
+        baselines.append(InstalledBaseline(source=path, version=version, files=files))
+    return baselines
+
+
+def normalize_manifest_path(path: str, source: Path) -> str:
+    normalized = normalize_path(path)
+    pure_path = PurePosixPath(normalized)
+    if not normalized or normalized.startswith("/") or any(
+        part in {"", ".", ".."} for part in pure_path.parts
+    ):
+        raise SystemExit(f"Installed baseline manifest {source} contains unsafe path {path!r}")
+    return str(pure_path)
+
+
+def add_unique(values: list[str | None], value: str | None) -> None:
+    if value not in values:
+        values.append(value)
+
+
+def encode_previous_baselines(
+    path: str, states_by_version: dict[str, list[str | None]]
+) -> dict[str, object]:
+    if all(len(states) == 1 for states in states_by_version.values()):
+        return {
+            "previous_sha256_by_version": {
+                version: states[0] for version, states in states_by_version.items()
+            }
+        }
+
+    versions_with_missing = [
+        version for version, states in states_by_version.items() if None in states
+    ]
+    if versions_with_missing:
+        raise SystemExit(
+            f"Cannot represent all installed baselines for {path} in manifest schema 1 because "
+            "missing-file states cannot be combined with multiple present-file hashes; "
+            f"conflicting version(s): {', '.join(versions_with_missing)}"
+        )
+
+    accepted_hashes = []
+    for states in states_by_version.values():
+        for digest in states:
+            if digest is not None:
+                add_unique(accepted_hashes, digest)
+    return {"previous_sha256": accepted_hashes}
 
 
 def changed_runtime_paths(repo: Path, from_ref: str, to_ref: str, runtime_paths: tuple[str, ...]) -> list[str]:
