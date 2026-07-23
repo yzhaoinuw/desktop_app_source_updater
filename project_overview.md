@@ -44,8 +44,12 @@ External to this repository.
   GitHub Release metadata plus `asset_prefix`.
 - Loads and validates `manifest.json`, payload hashes, app name, schema version,
   allowed paths, compatibility versions, and baseline hashes.
+- Supports schema-2 AST-guided merging for one explicitly declared
+  user-editable Python config while ordinary source retains whole-file hash
+  protection.
 - Blocks dependency, packaging, build, cache, archive, and local-data paths.
-- Applies payload files with a temporary backup and rollback on failure.
+- Prepares and validates all final payload bytes before applying files with a
+  temporary backup and rollback on failure.
 - Returns status/message data instead of raising for normal update outcomes.
 
 ### 4. Release Asset Builder
@@ -59,6 +63,9 @@ External to this repository.
   variants, including multiple present-file baselines reporting one version.
 - Preserves version-specific missing-file baselines and refuses schema-1 cases
   that cannot safely represent both missing and multiple present states.
+- Emits schema 2 for one `--python-config-merge` path plus its repeatable
+  `--editable-assignment` allowlist, validating the downloaded template before
+  creating the asset.
 - Refuses source-only assets when blocked path categories changed.
 - Refuses runtime deletions, renames, and complex changes because those need a
   packaged refresh.
@@ -78,10 +85,12 @@ project_root/
 |- desktop_app_source_updater/
 |  |- __init__.py
 |  |- core.py
+|  |- python_config.py
 |  `- build_update_asset.py
 `- tests/
    |- test_core.py
-   `- test_build_update_asset.py
+   |- test_build_update_asset.py
+   `- test_python_config.py
 ```
 
 ## What Looks Active vs. Legacy
@@ -90,9 +99,11 @@ project_root/
 
 - [`desktop_app_source_updater/core.py`](desktop_app_source_updater/core.py)
 - [`desktop_app_source_updater/build_update_asset.py`](desktop_app_source_updater/build_update_asset.py)
+- [`desktop_app_source_updater/python_config.py`](desktop_app_source_updater/python_config.py)
 - [`desktop_app_source_updater/__init__.py`](desktop_app_source_updater/__init__.py)
 - [`tests/test_core.py`](tests/test_core.py)
 - [`tests/test_build_update_asset.py`](tests/test_build_update_asset.py)
+- [`tests/test_python_config.py`](tests/test_python_config.py)
 - [`README.md`](README.md)
 - [`AGENTS.md`](AGENTS.md)
 - [`next_steps.md`](next_steps.md)
@@ -109,7 +120,11 @@ project_root/
   baselines, blocked paths, and local edit hash mismatches.
 - [`tests/test_build_update_asset.py`](tests/test_build_update_asset.py) creates
   temporary Git repositories to verify multi-baseline manifest generation and
-  refusal of dependency changes. These tests skip only when Git is unavailable.
+  schema-2 config assets, plus refusal of unsafe builder inputs and dependency
+  changes. These tests skip only when Git is unavailable.
+- [`tests/test_python_config.py`](tests/test_python_config.py) covers literal
+  assignment preservation, recursive dictionary merging, downloaded template
+  authority, and malformed or ambiguous config failures.
 - There is no persistent sample-data directory. Fixtures are generated in
   temporary directories by the tests.
 
@@ -135,7 +150,7 @@ manifest.json
 <allowed runtime path>/...
 ```
 
-The manifest schema version is currently `1`. Important fields include:
+The runtime supports manifest schema versions `1` and `2`. Important fields include:
 
 - `app`: must match `UpdateConfig.app_name`.
 - `version`: target version in the update asset.
@@ -144,6 +159,9 @@ The manifest schema version is currently `1`. Important fields include:
 - `files`: payload entries with `path`, `sha256`, and preferably
   `previous_sha256_by_version`; `previous_sha256` lists are used when a file
   has multiple legitimate present-byte baselines.
+- Schema-2 config entries add `update_strategy: "python-config-merge"` and an
+  explicit `editable_assignments` list. Exactly one such file is supported per
+  asset; ordinary entries keep replacement semantics.
 
 ## Practical Mental Model
 
@@ -154,8 +172,10 @@ If you only want to understand the current product, read files in this order:
 3. [`desktop_app_source_updater/__init__.py`](desktop_app_source_updater/__init__.py)
 4. [`desktop_app_source_updater/core.py`](desktop_app_source_updater/core.py)
 5. [`desktop_app_source_updater/build_update_asset.py`](desktop_app_source_updater/build_update_asset.py)
-6. [`tests/test_core.py`](tests/test_core.py)
-7. [`tests/test_build_update_asset.py`](tests/test_build_update_asset.py)
+6. [`desktop_app_source_updater/python_config.py`](desktop_app_source_updater/python_config.py)
+7. [`tests/test_core.py`](tests/test_core.py)
+8. [`tests/test_build_update_asset.py`](tests/test_build_update_asset.py)
+9. [`tests/test_python_config.py`](tests/test_python_config.py)
 
 ## Questions Worth Clarifying Later
 

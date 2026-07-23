@@ -40,6 +40,10 @@ The updater must:
 - block dependency, packaging, build, cache, archive, and local-data paths
 - verify baseline hashes and preserve unknown local edits
 - support jump-ahead updates through `previous_sha256_by_version`
+- apply ordinary payload files atomically only when every listed baseline
+  matches; unlisted source files remain untouched
+- support one explicitly declared schema-2 Python config merge file while
+  preserving only allowlisted literal assignments
 
 The builder in `build_update_asset.py` accepts repeated `--from-ref` values
 and refuses source-only assets when changes require a packaged refresh.

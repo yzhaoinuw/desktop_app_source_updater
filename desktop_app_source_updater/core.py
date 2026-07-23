@@ -14,6 +14,14 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .python_config import (
+    PYTHON_CONFIG_MERGE_STRATEGY,
+    REPLACE_STRATEGY,
+    PythonConfigMergeError,
+    merge_python_config,
+    validate_editable_assignment_names,
+)
+
 
 DEFAULT_TIMEOUT_SECONDS = 6
 DEFAULT_MAX_UPDATE_BYTES = 80 * 1024 * 1024
@@ -79,10 +87,13 @@ class UpdateFile:
     sha256: str
     previous_sha256: tuple[str, ...] = field(default_factory=tuple)
     previous_sha256_by_version: dict[str, str | None] = field(default_factory=dict)
+    update_strategy: str = REPLACE_STRATEGY
+    editable_assignments: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
 class UpdatePackage:
+    schema_version: int
     app_name: str
     version: str
     files: tuple[UpdateFile, ...]
@@ -135,7 +146,8 @@ def run_startup_update(config: UpdateConfig) -> StartupUpdateResult:
             if local_edit_error:
                 return StartupUpdateResult("skipped", local_edit_error, package.changed_files)
 
-            _apply_update_package(root, update_zip, package)
+            prepared_payloads = _prepare_update_payloads(root, update_zip, package)
+            _apply_update_package(root, prepared_payloads, package)
             return StartupUpdateResult("updated", f"updated to {package.version}", package.changed_files)
     except UpdateError as exc:
         return StartupUpdateResult("failed", str(exc))
@@ -283,7 +295,8 @@ def _load_update_package(update_zip: Path, config: UpdateConfig) -> UpdatePackag
 
 
 def _parse_manifest(manifest: dict[str, Any], zf: zipfile.ZipFile, config: UpdateConfig) -> UpdatePackage:
-    if manifest.get("schema_version") != 1:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in {1, 2}:
         raise UpdateError("update manifest has an unsupported schema version")
 
     app_name = str(manifest.get("app") or "")
@@ -295,9 +308,18 @@ def _parse_manifest(manifest: dict[str, Any], zf: zipfile.ZipFile, config: Updat
         raise UpdateError("update manifest is missing version")
 
     zip_names = {_normalize_payload_path(name) for name in zf.namelist()}
-    files = tuple(_parse_update_file(item, zf, zip_names) for item in manifest.get("files") or [])
+    files = tuple(
+        _parse_update_file(item, zf, zip_names, schema_version)
+        for item in manifest.get("files") or []
+    )
     if not files:
         raise UpdateError("update manifest does not list any files")
+    merge_files = tuple(
+        update_file for update_file in files
+        if update_file.update_strategy == PYTHON_CONFIG_MERGE_STRATEGY
+    )
+    if schema_version == 2 and len(merge_files) != 1:
+        raise UpdateError("schema 2 update manifests must declare exactly one Python config merge file")
 
     changed_files = tuple(_normalize_payload_path(path) for path in (manifest.get("changed_files") or [file.path for file in files]))
     from_versions = tuple(str(version) for version in manifest.get("from_versions") or [])
@@ -305,10 +327,23 @@ def _parse_manifest(manifest: dict[str, Any], zf: zipfile.ZipFile, config: Updat
     if minimum_version is not None:
         minimum_version = str(minimum_version)
 
-    return UpdatePackage(app_name=app_name, version=version, files=files, changed_files=changed_files, from_versions=from_versions, minimum_version=minimum_version)
+    return UpdatePackage(
+        schema_version=schema_version,
+        app_name=app_name,
+        version=version,
+        files=files,
+        changed_files=changed_files,
+        from_versions=from_versions,
+        minimum_version=minimum_version,
+    )
 
 
-def _parse_update_file(item: dict[str, Any], zf: zipfile.ZipFile, zip_names: set[str]) -> UpdateFile:
+def _parse_update_file(
+    item: dict[str, Any],
+    zf: zipfile.ZipFile,
+    zip_names: set[str],
+    schema_version: int,
+) -> UpdateFile:
     if not isinstance(item, dict):
         raise UpdateError("update manifest files must be objects")
 
@@ -321,12 +356,44 @@ def _parse_update_file(item: dict[str, Any], zf: zipfile.ZipFile, zip_names: set
     if expected_sha256 and payload_sha256 != expected_sha256:
         raise UpdateError(f"payload hash mismatch for {path}")
 
+    update_strategy = item.get("update_strategy", REPLACE_STRATEGY)
+    if not isinstance(update_strategy, str):
+        raise UpdateError(f"update strategy for {path} must be a string")
+    if schema_version == 1:
+        if "update_strategy" in item or "editable_assignments" in item:
+            raise UpdateError("schema 1 update manifests cannot declare update strategies")
+        update_strategy = REPLACE_STRATEGY
+    elif update_strategy not in {REPLACE_STRATEGY, PYTHON_CONFIG_MERGE_STRATEGY}:
+        raise UpdateError(f"unsupported update strategy for {path}: {update_strategy}")
+
+    editable_assignments = _parse_editable_assignments(item, path, update_strategy)
+
     return UpdateFile(
         path=path,
         sha256=payload_sha256,
         previous_sha256=_coerce_previous_sha256_values(item.get("previous_sha256")),
         previous_sha256_by_version=_coerce_previous_sha256_by_version(item.get("previous_sha256_by_version")),
+        update_strategy=update_strategy,
+        editable_assignments=editable_assignments,
     )
+
+
+def _parse_editable_assignments(
+    item: dict[str, Any], path: str, update_strategy: str
+) -> tuple[str, ...]:
+    value = item.get("editable_assignments")
+    if update_strategy == REPLACE_STRATEGY:
+        if value is not None:
+            raise UpdateError(f"replace strategy file {path} cannot declare editable assignments")
+        return ()
+    if not path.lower().endswith(".py"):
+        raise UpdateError("python config merge strategy requires a .py payload path")
+    if not isinstance(value, list) or any(not isinstance(name, str) for name in value):
+        raise UpdateError(f"editable assignments for {path} must be a list of strings")
+    try:
+        return validate_editable_assignment_names(value)
+    except PythonConfigMergeError as exc:
+        raise UpdateError(str(exc)) from exc
 
 
 def _normalize_payload_path(path: str) -> str:
@@ -398,6 +465,8 @@ def _coerce_previous_sha256_by_version(value: Any) -> dict[str, str | None]:
 
 def _get_local_edit_error(root: Path, installed_version: str, package: UpdatePackage) -> str:
     for update_file in package.files:
+        if update_file.update_strategy == PYTHON_CONFIG_MERGE_STRATEGY:
+            continue
         target = root / update_file.path
         if update_file.previous_sha256_by_version:
             if installed_version not in update_file.previous_sha256_by_version:
@@ -424,26 +493,60 @@ def _get_local_edit_error(root: Path, installed_version: str, package: UpdatePac
     return ""
 
 
-def _apply_update_package(root: Path, update_zip: Path, package: UpdatePackage) -> None:
+def _prepare_update_payloads(
+    root: Path, update_zip: Path, package: UpdatePackage
+) -> dict[str, bytes]:
+    prepared = {}
+    try:
+        with zipfile.ZipFile(update_zip) as zf:
+            for update_file in package.files:
+                payload = zf.read(update_file.path)
+                if update_file.update_strategy == PYTHON_CONFIG_MERGE_STRATEGY:
+                    target = root / update_file.path
+                    if not target.is_file():
+                        raise UpdateError(f"installed Python config is missing: {update_file.path}")
+                    try:
+                        payload = merge_python_config(
+                            payload,
+                            target.read_bytes(),
+                            update_file.editable_assignments,
+                            path=update_file.path,
+                        )
+                    except OSError as exc:
+                        raise UpdateError(
+                            f"could not read installed Python config {update_file.path}: {exc}"
+                        ) from exc
+                    except PythonConfigMergeError as exc:
+                        raise UpdateError(str(exc)) from exc
+                prepared[update_file.path] = payload
+    except KeyError as exc:
+        raise UpdateError(f"update zip is missing payload file: {exc.args[0]}") from exc
+    return prepared
+
+
+def _apply_update_package(
+    root: Path,
+    prepared_payloads: dict[str, bytes],
+    package: UpdatePackage,
+) -> None:
     temp_backup = tempfile.TemporaryDirectory(prefix=f".{package.app_name}-update-backup-", dir=root)
     backup_root = Path(temp_backup.name)
     applied: list[tuple[Path, Path, bool]] = []
     try:
-        with zipfile.ZipFile(update_zip) as zf:
-            for update_file in package.files:
-                target = root / update_file.path
-                backup = backup_root / update_file.path
-                staged = backup_root / "__staged__" / update_file.path
-                existed = target.exists()
-                if existed:
-                    backup.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(target, backup)
+        for update_file in package.files:
+            target = root / update_file.path
+            backup = backup_root / update_file.path
+            staged = backup_root / "__staged__" / update_file.path
+            existed = target.exists()
+            if existed:
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, backup)
 
-                staged.parent.mkdir(parents=True, exist_ok=True)
-                staged.write_bytes(zf.read(update_file.path))
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(staged, target)
-                applied.append((target, backup, existed))
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            staged.write_bytes(prepared_payloads[update_file.path])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(staged, target)
+            applied.append((target, backup, existed))
     except Exception as exc:
         _roll_back_update(applied)
         raise UpdateError(f"could not apply update: {exc}") from exc

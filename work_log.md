@@ -10,6 +10,33 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-07-22
 
+### Added schema-2 semantic Python config merging (Codex GPT-5, default mode)
+
+- Added a schema-2 manifest contract that marks exactly one Python config file
+  for semantic merging and explicitly allowlists its user-editable assignments;
+  schema 1 remains replacement-only and rejects strategy metadata.
+- Added a stdlib-only AST merge engine that starts from downloaded source,
+  preserves installed literal values through source-span replacement, merges
+  dictionaries recursively, and retains downloaded code, comments, ordering,
+  defaults, and removals.
+- Prepared and compiled merged bytes before mutation, kept ordinary payload
+  files on the existing whole-file baseline checks, and integrated final bytes
+  with the existing all-or-nothing backup and rollback transaction.
+- Added builder flags `--python-config-merge` and repeatable
+  `--editable-assignment`, including downloaded-template validation and
+  automatic schema-2 asset emission.
+- Documented why an unknown edit to any ordinary bundled file skips the entire
+  update, why unlisted files are untouched, and why downstream adoption needs
+  a new full packaged release before schema-2 assets are safe.
+- Delivery path is `feature/issue-2-python-config-merge` to `dev` to `main`,
+  followed by closing GitHub issue #2 after both published refs are confirmed.
+- Verification:
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m unittest discover -s tests -v`: 23 tests passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m compileall -q desktop_app_source_updater`: passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m desktop_app_source_updater.build_update_asset --help`: passed and listed the schema-2 config merge options.
+  - `treaty validate .`: not run because the `treaty` command is unavailable
+    in this shell.
+
 ### Added multiple installed byte baselines to the asset builder (Codex GPT-5, default mode)
 
 - Added repeatable `--installed-baseline-manifest` inputs that describe exact

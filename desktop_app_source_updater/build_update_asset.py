@@ -15,6 +15,12 @@ from .core import (
     DEFAULT_BLOCKED_PATH_PREFIXES,
     DEFAULT_BLOCKED_PATH_SUFFIXES,
 )
+from .python_config import (
+    PYTHON_CONFIG_MERGE_STRATEGY,
+    PythonConfigMergeError,
+    validate_editable_assignment_names,
+    validate_python_config_template,
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +85,21 @@ def main(argv: list[str] | None = None) -> int:
         print("No runtime source files changed.", file=sys.stderr)
         return 1
 
+    merge_path, editable_assignments = resolve_python_config_merge(
+        args.python_config_merge,
+        args.editable_assignment,
+        changed_runtime,
+    )
+    if merge_path is not None:
+        try:
+            validate_python_config_template(
+                git_file_bytes(repo, args.to_ref, merge_path),
+                editable_assignments,
+                path=merge_path,
+            )
+        except PythonConfigMergeError as exc:
+            raise SystemExit(str(exc)) from exc
+
     manifest_files = []
     payloads = {}
     for path in changed_runtime:
@@ -100,11 +121,14 @@ def main(argv: list[str] | None = None) -> int:
 
         manifest_file = {"path": path, "sha256": sha256(current_bytes)}
         manifest_file.update(encode_previous_baselines(path, previous_states_by_version))
+        if path == merge_path:
+            manifest_file["update_strategy"] = PYTHON_CONFIG_MERGE_STRATEGY
+            manifest_file["editable_assignments"] = list(editable_assignments)
         manifest_files.append(manifest_file)
         payloads[path] = current_bytes
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2 if merge_path is not None else 1,
         "app": args.app_name,
         "version": version,
         "from_versions": from_versions,
@@ -149,6 +173,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "source-patched baselines. Each manifest maps paths to SHA-256 strings or null."
         ),
     )
+    parser.add_argument(
+        "--python-config-merge",
+        help=(
+            "Changed runtime .py file whose downloaded template should preserve explicitly declared "
+            "installed values. Schema 2 supports one such file per asset."
+        ),
+    )
+    parser.add_argument(
+        "--editable-assignment",
+        action="append",
+        default=[],
+        help=(
+            "Top-level literal assignment to preserve in --python-config-merge. Repeat for each "
+            "user-editable setting."
+        ),
+    )
     parser.add_argument("--to-ref", default="HEAD", help="New release tag or commit to package. Defaults to HEAD.")
     parser.add_argument("--version", help="Target version string. Defaults to VERSION in --version-file at --to-ref.")
     parser.add_argument(
@@ -167,6 +207,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--blocked-path-prefix", action="append", help="Path prefix that requires full packaging. Repeat to override defaults.")
     parser.add_argument("--blocked-path-suffix", action="append", help="Path suffix that requires full packaging. Repeat to override defaults.")
     return parser.parse_args(argv)
+
+
+def resolve_python_config_merge(
+    merge_path: str | None,
+    editable_assignments: list[str],
+    changed_runtime: list[str],
+) -> tuple[str | None, tuple[str, ...]]:
+    if merge_path is None:
+        if editable_assignments:
+            raise SystemExit("--editable-assignment requires --python-config-merge")
+        return None, ()
+
+    normalized = normalize_path(merge_path)
+    if not normalized.lower().endswith(".py"):
+        raise SystemExit("--python-config-merge must identify a .py runtime path")
+    if normalized not in changed_runtime:
+        raise SystemExit(
+            f"Python config merge path {normalized} is not a changed runtime file in this asset"
+        )
+    try:
+        names = validate_editable_assignment_names(editable_assignments)
+    except PythonConfigMergeError as exc:
+        raise SystemExit(str(exc)) from exc
+    return normalized, names
 
 
 def load_installed_baseline_manifests(paths: list[Path]) -> list[InstalledBaseline]:

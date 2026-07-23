@@ -1,5 +1,6 @@
 ﻿import hashlib
 import json
+import os
 import unittest
 import zipfile
 from io import BytesIO
@@ -48,6 +49,9 @@ class ReleaseZipFixture:
         from_versions=None,
         previous_payloads_by_version=None,
         include_previous_hashes=True,
+        schema_version=1,
+        merge_path=None,
+        editable_assignments=(),
     ):
         payloads = payloads or {
             "demo_src/__init__.py": f'VERSION = "{version}"\n',
@@ -73,10 +77,13 @@ class ReleaseZipFixture:
                         prior_version: sha256(installed.read_bytes())
                         for prior_version in versions
                     }
+            if relative_path == merge_path:
+                item["update_strategy"] = "python-config-merge"
+                item["editable_assignments"] = list(editable_assignments)
             files.append(item)
 
         manifest = {
-            "schema_version": 1,
+            "schema_version": schema_version,
             "app": "demo_app",
             "version": version,
             "from_versions": from_versions or ["v1.0.0"],
@@ -196,6 +203,103 @@ class TestStartupUpdate(unittest.TestCase):
             self.assertEqual("application/vnd.github+json", requests[0].get_header("Accept"))
             self.assertEqual("application/octet-stream", requests[1].get_header("Accept"))
 
+    def test_merges_declared_config_values_and_replaces_ordinary_source(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            self._write_config_merge_baseline(fixture)
+            update_zip = self._build_config_merge_update(fixture)
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("updated", result.status)
+            merged_config = fixture.read_app_file("demo_src/config.py")
+            self.assertIn("# downloaded config", merged_config)
+            self.assertIn('MODEL = "user"', merged_config)
+            self.assertIn('"length": 20', merged_config)
+            self.assertIn('"new_only": 2', merged_config)
+            self.assertIn('"Wake": "green"', merged_config)
+            self.assertIn('"NREM": "purple"', merged_config)
+            self.assertIn("DERIVED = new_runtime_value()", merged_config)
+            self.assertNotIn("old_only", merged_config)
+            self.assertEqual("VALUE = 'new'\n", fixture.read_app_file("demo_src/app.py"))
+            self.assertEqual('VERSION = "v1.0.1"\n', fixture.read_app_file("demo_src/__init__.py"))
+
+    def test_ordinary_local_edit_skips_entire_schema_2_update(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            self._write_config_merge_baseline(fixture)
+            update_zip = self._build_config_merge_update(fixture)
+            original_config = fixture.read_app_file("demo_src/config.py")
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'local edit'\n")
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("skipped", result.status)
+            self.assertIn("differ from the update baseline", result.message)
+            self.assertEqual(original_config, fixture.read_app_file("demo_src/config.py"))
+            self.assertEqual("VALUE = 'local edit'\n", fixture.read_app_file("demo_src/app.py"))
+            self.assertEqual('VERSION = "v1.0.0"\n', fixture.read_app_file("demo_src/__init__.py"))
+
+    def test_schema_1_rejects_config_merge_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            self._write_config_merge_baseline(fixture)
+            update_zip = fixture.build_update_zip(
+                schema_version=1,
+                merge_path="demo_src/config.py",
+                editable_assignments=("MODEL",),
+                payloads={
+                    "demo_src/config.py": 'MODEL = "new default"\n',
+                    "demo_src/__init__.py": 'VERSION = "v1.0.1"\n',
+                },
+            )
+            original_config = fixture.read_app_file("demo_src/config.py")
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("failed", result.status)
+            self.assertIn("schema 1", result.message)
+            self.assertEqual(original_config, fixture.read_app_file("demo_src/config.py"))
+            self.assertEqual('VERSION = "v1.0.0"\n', fixture.read_app_file("demo_src/__init__.py"))
+
+    def test_invalid_installed_config_fails_before_any_file_changes(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            self._write_config_merge_baseline(fixture)
+            update_zip = self._build_config_merge_update(fixture)
+            invalid_config = "MODEL = [\n"
+            fixture.write_app_file("demo_src/config.py", invalid_config)
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("failed", result.status)
+            self.assertIn("installed Python config", result.message)
+            self.assertEqual(invalid_config, fixture.read_app_file("demo_src/config.py"))
+            self.assertEqual("VALUE = 'old'\n", fixture.read_app_file("demo_src/app.py"))
+            self.assertEqual('VERSION = "v1.0.0"\n', fixture.read_app_file("demo_src/__init__.py"))
+
+    def test_later_apply_failure_rolls_back_merged_config(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            self._write_config_merge_baseline(fixture)
+            update_zip = self._build_config_merge_update(fixture)
+            original_config = fixture.read_app_file("demo_src/config.py")
+            real_replace = os.replace
+
+            def fail_on_app_file(source, destination):
+                if Path(destination).name == "app.py":
+                    raise OSError("simulated apply failure")
+                return real_replace(source, destination)
+
+            with patch("desktop_app_source_updater.core.os.replace", side_effect=fail_on_app_file):
+                result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("failed", result.status)
+            self.assertIn("simulated apply failure", result.message)
+            self.assertEqual(original_config, fixture.read_app_file("demo_src/config.py"))
+            self.assertEqual("VALUE = 'old'\n", fixture.read_app_file("demo_src/app.py"))
+            self.assertEqual('VERSION = "v1.0.0"\n', fixture.read_app_file("demo_src/__init__.py"))
+
     def test_blocks_unallowed_dependency_path(self):
         with TemporaryDirectory() as temp_dir:
             fixture = ReleaseZipFixture(temp_dir)
@@ -225,6 +329,42 @@ class TestStartupUpdate(unittest.TestCase):
             self.assertEqual("skipped", result.status)
             self.assertIn("differ from the update baseline", result.message)
             self.assertEqual("VALUE = 'local edit'\n", fixture.read_app_file("demo_src/app.py"))
+
+    def _write_config_merge_baseline(self, fixture):
+        fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+        fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+        fixture.write_app_file(
+            "demo_src/config.py",
+            '''# installed config
+MODEL = "user"
+WINDOW_CONFIG = {
+    "length": 20,
+    "old_only": 1,
+}
+STAGE_COLORS = {"Wake": "green"}
+DERIVED = old_runtime_value()
+''',
+        )
+
+    def _build_config_merge_update(self, fixture):
+        return fixture.build_update_zip(
+            schema_version=2,
+            merge_path="demo_src/config.py",
+            editable_assignments=("MODEL", "WINDOW_CONFIG", "STAGE_COLORS"),
+            payloads={
+                "demo_src/config.py": '''# downloaded config
+MODEL = "default"
+WINDOW_CONFIG = {
+    "length": 30,
+    "new_only": 2,
+}
+STAGE_COLORS = {"Wake": "blue", "NREM": "purple"}
+DERIVED = new_runtime_value()
+''',
+                "demo_src/app.py": "VALUE = 'new'\n",
+                "demo_src/__init__.py": 'VERSION = "v1.0.1"\n',
+            },
+        )
 
 
 if __name__ == "__main__":

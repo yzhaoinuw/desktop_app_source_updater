@@ -77,6 +77,7 @@ class TestBuildUpdateAsset(unittest.TestCase):
                 manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
 
             self.assertEqual("demo_app", manifest["app"])
+            self.assertEqual(1, manifest["schema_version"])
             self.assertEqual(["v1.0.0", "v1.0.1"], manifest["from_versions"])
             app_entry = next(item for item in manifest["files"] if item["path"] == "demo_src/app.py")
             self.assertEqual({"v1.0.0", "v1.0.1"}, set(app_entry["previous_sha256_by_version"]))
@@ -170,6 +171,136 @@ class TestBuildUpdateAsset(unittest.TestCase):
             )
             self.assertEqual("skipped", result.status)
             self.assertEqual(edited_bytes, (edited_root / "demo_src/app.py").read_bytes())
+
+    def test_builds_and_applies_python_config_merge_asset(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not available on PATH")
+
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            repo = temp_path / "repo"
+            repo.mkdir()
+            self._git(repo, "init", "-b", "main")
+            self._git(repo, "config", "user.email", "test@example.com")
+            self._git(repo, "config", "user.name", "Test User")
+
+            old_config = '''# old config
+MODEL = "default-old"
+WINDOW_CONFIG = {"length": 30, "removed": True}
+DERIVED = old_runtime_value()
+'''
+            self._write(repo, "demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            self._write(repo, "demo_src/app.py", "VALUE = 'old'\n")
+            self._write(repo, "demo_src/config.py", old_config)
+            self._commit(repo, "v1.0.0")
+            self._git(repo, "tag", "v1.0.0")
+
+            new_config = '''# downloaded config
+MODEL = "default-new"
+WINDOW_CONFIG = {"length": 60, "added": True}
+NEW_SETTING = "new default"
+DERIVED = new_runtime_value()
+'''
+            self._write(repo, "demo_src/__init__.py", 'VERSION = "v1.0.1"\n')
+            self._write(repo, "demo_src/app.py", "VALUE = 'new'\n")
+            self._write(repo, "demo_src/config.py", new_config)
+            self._commit(repo, "v1.0.1")
+
+            output_zip = temp_path / "demo_app_update_v1.0.1.zip"
+            self._run_builder(
+                repo,
+                "--python-config-merge",
+                "demo_src/config.py",
+                "--editable-assignment",
+                "MODEL",
+                "--editable-assignment",
+                "WINDOW_CONFIG",
+                "--editable-assignment",
+                "NEW_SETTING",
+                "--output",
+                str(output_zip),
+                check=True,
+            )
+
+            with zipfile.ZipFile(output_zip) as zf:
+                manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+            self.assertEqual(2, manifest["schema_version"])
+            config_entry = next(
+                item for item in manifest["files"] if item["path"] == "demo_src/config.py"
+            )
+            self.assertEqual("python-config-merge", config_entry["update_strategy"])
+            self.assertEqual(
+                ["MODEL", "WINDOW_CONFIG", "NEW_SETTING"],
+                config_entry["editable_assignments"],
+            )
+            ordinary_entries = [
+                item for item in manifest["files"] if item["path"] != "demo_src/config.py"
+            ]
+            self.assertTrue(ordinary_entries)
+            self.assertTrue(all("update_strategy" not in item for item in ordinary_entries))
+
+            app_root = temp_path / "installed"
+            self._write(app_root, "demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            self._write(app_root, "demo_src/app.py", "VALUE = 'old'\n")
+            self._write(
+                app_root,
+                "demo_src/config.py",
+                old_config.replace('MODEL = "default-old"', 'MODEL = "user-choice"'),
+            )
+            result = run_startup_update(
+                UpdateConfig(
+                    app_name="demo_app",
+                    app_root=app_root,
+                    allowed_payload_paths=("demo_src/",),
+                    installed_version_file="demo_src/__init__.py",
+                    update_url=str(output_zip),
+                )
+            )
+
+            self.assertEqual("updated", result.status)
+            merged_config = (app_root / "demo_src/config.py").read_text(encoding="utf-8")
+            self.assertIn('MODEL = "user-choice"', merged_config)
+            self.assertIn('"length": 30', merged_config)
+            self.assertIn('"added": True', merged_config)
+            self.assertIn('NEW_SETTING = "new default"', merged_config)
+            self.assertIn("DERIVED = new_runtime_value()", merged_config)
+            self.assertNotIn("removed", merged_config)
+            self.assertEqual("VALUE = 'new'\n", (app_root / "demo_src/app.py").read_text())
+
+    def test_refuses_python_config_merge_name_missing_from_template(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not available on PATH")
+
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            repo = temp_path / "repo"
+            repo.mkdir()
+            self._git(repo, "init", "-b", "main")
+            self._git(repo, "config", "user.email", "test@example.com")
+            self._git(repo, "config", "user.name", "Test User")
+
+            self._write(repo, "demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            self._write(repo, "demo_src/config.py", 'MODEL = "old"\n')
+            self._commit(repo, "v1.0.0")
+            self._git(repo, "tag", "v1.0.0")
+            self._write(repo, "demo_src/config.py", 'MODEL = "new"\n')
+            self._commit(repo, "v1.0.1")
+
+            result = self._run_builder(
+                repo,
+                "--version",
+                "v1.0.1",
+                "--python-config-merge",
+                "demo_src/config.py",
+                "--editable-assignment",
+                "MISSING_SETTING",
+                "--output",
+                str(temp_path / "should-not-exist.zip"),
+                check=False,
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("missing editable assignment MISSING_SETTING", result.stderr)
 
     def test_refuses_unrepresentable_missing_and_present_same_version_baselines(self):
         if shutil.which("git") is None:

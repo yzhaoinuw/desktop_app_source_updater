@@ -52,6 +52,26 @@ This does not:
 
 If dependencies, packaging, build files, local data, deletions, or renames change, ship a normal full packaged app release.
 
+## Why Ordinary Local Edits Skip The Whole Update
+
+The updater checks only the files listed in a particular update asset. Every
+ordinary listed file must match a recognized installed baseline before any
+file is changed. If even one ordinary file has unknown bytes, the updater
+skips the entire asset and leaves every file unchanged. It does not overwrite
+the edited file or partially update the remaining files.
+
+This fail-closed behavior is intentional. A hash mismatch could be a deliberate
+user patch, an emergency local fix, accidental damage, or an unexpected package
+build. The updater cannot safely decide that those bytes are disposable, and
+updating only part of a release could leave mutually dependent modules at
+incompatible versions.
+
+A source file that is not listed in the update asset is not inspected or
+touched. If a later asset needs to update that file, its installed bytes must
+then match a recognized baseline. The schema-2 Python config merge described
+below is the only exception to whole-file baseline matching, and it applies
+only to the explicitly declared user-editable config file and assignment names.
+
 ## Adopt It In An Existing App
 
 ### 1. Add The Dependency
@@ -193,6 +213,51 @@ changed path whose baseline set needs both a missing-file state and multiple
 present-file hashes, so the builder refuses that case instead of creating an
 unsafe or incomplete asset.
 
+### Merge One User-Editable Python Config
+
+If an app intentionally keeps user settings in a Python config file, a schema-2
+asset can merge that one file while every other payload file retains the normal
+hash-verified replacement behavior:
+
+```powershell
+python -m desktop_app_source_updater.build_update_asset `
+  --app-name my_app `
+  --runtime-path my_app_src `
+  --from-ref v1.2.2 `
+  --to-ref v1.2.3 `
+  --version-file my_app_src/__init__.py `
+  --python-config-merge my_app_src/config.py `
+  --editable-assignment SLEEP_SCORING_MODEL `
+  --editable-assignment WINDOW_CONFIG
+```
+
+The path is app-specific; the updater does not hard-code `config.py`. The
+assignment allowlist is also explicit because a config module may contain
+derived runtime values that users are not meant to control.
+
+For the declared assignments, the downloaded file remains the authoritative
+template:
+
+- a value present in both files keeps the installed user's value;
+- a value missing from the installed file uses the downloaded default;
+- assignments and dictionary keys removed from the downloaded template remain
+  removed;
+- literal dictionaries merge recursively, while scalar and list values are
+  preserved atomically;
+- imports, functions, comments, ordering, and undeclared assignments come from
+  the downloaded file.
+
+Both files are parsed without being imported or executed. Invalid Python,
+duplicate or unsupported editable assignments, and nonliteral editable values
+fail the entire update before mutation. The merged final bytes are prepared and
+compiled before the existing backup-and-rollback transaction applies any file.
+
+Schema 2 is a frozen-runtime compatibility boundary. An older updater supports
+only schema 1 and rejects schema-2 assets instead of ignoring the merge request
+and overwriting the config. Therefore, an app must first ship a full packaged
+release containing a schema-2-compatible updater. It cannot safely introduce
+this capability to an old packaged installation through a source-only asset.
+
 ### 7. Upload The Zip To The App Release
 
 Attach the generated zip to the app's GitHub Release. The default filename is:
@@ -216,6 +281,10 @@ At minimum, test these cases in the app repo:
 - clean compatible install updates successfully
 - skipped-release jump updates successfully when multiple `--from-ref` values are included
 - local edit/hash mismatch skips without overwriting user-modified files
+- one ordinary bundled-file edit skips the entire asset without partially
+  applying other files
+- schema-2 config updates preserve declared user values while replacing
+  ordinary source files normally
 - dependency or packaging changes make the builder refuse a source-only asset
 - `MY_APP_SKIP_UPDATE=1` bypasses the startup update
 - app still launches normally when GitHub is unreachable
