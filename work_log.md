@@ -10,6 +10,19 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-07-28
 
+### Integrated updater 0.2.0 and treaty v0.4.1 through dev (Codex GPT-5, default mode)
+
+- Committed the previously staged treaty refresh as `2d3b96a`, fast-forwarded
+  `dev` to the durable startup-check commit, and merged the treaty branch
+  without conflicts or unresolved files.
+- Revalidated the combined `dev` tree before its planned fast-forward into
+  `main`; no push, tag, publication, or pull request was performed.
+- Verification:
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m unittest discover -s tests -v`: 34 tests passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m compileall -q desktop_app_source_updater`: passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m desktop_app_source_updater.build_update_asset --help`: passed.
+  - `C:\Users\yzhao\python_projects\agent_collab_treaty\.venv\Scripts\treaty.exe validate .`: passed.
+
 ### Added durable API-free startup checks (Codex GPT-5, default mode)
 
 - Added API-free latest-release discovery through GitHub's ordinary redirect,
