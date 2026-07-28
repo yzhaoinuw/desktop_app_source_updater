@@ -38,6 +38,26 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-07-22
 
+### Updated Agent Collab Treaty to v0.4.1 (Codex GPT-5, default mode)
+
+- Updated the Copier treaty pin from `v0.3.3` to `v0.4.1` while preserving the
+  existing template answers and enabled tri-color adoption badge.
+- Resolved the expected whole-file `AGENTS.md` conflict by retaining the compact
+  project runtime and updater contracts while folding in the new substantive
+  work-log criteria, five-date rotation rule, treaty-update workflow, and commit
+  guidance.
+- Confirmed that Copier child processes need a command-scoped `safe.directory`
+  override for this Windows checkout. The applied update then hit a CP1252
+  `UnicodeEncodeError` while printing the Unicode version arrow after Copier
+  returned; the pin and merge were already written, so the Git index was
+  inspected and the `AGENTS.md` conflict was resolved explicitly.
+- Verification:
+  - `C:\Users\yzhao\python_projects\agent_collab_treaty\.venv\Scripts\treaty.exe validate .`: passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m unittest discover -s tests -v`: 23 tests passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m compileall -q desktop_app_source_updater`: passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m desktop_app_source_updater.build_update_asset --help`: passed.
+  - `git diff --cached --check`: passed before the work-log entry was added.
+
 ### Added schema-2 semantic Python config merging (Codex GPT-5, default mode)
 
 - Added a schema-2 manifest contract that marks exactly one Python config file
