@@ -8,6 +8,34 @@ If today's date already has a `## YYYY-MM-DD` header at the top, add a new `###`
 
 Update this log at the end of any substantive work session unless the user explicitly asks not to document it. Substantive work includes file edits, meaningful validation or debugging, technical decisions or reversals, reusable discoveries, branch/PR/release state changes, or follow-up work that future agents need. Log useful experiments even when the code was reverted; skip casual Q&A, trivial one-off commands, and pure scratch work with no future coordination value.
 
+## 2026-07-28
+
+### Added durable API-free startup checks (Codex GPT-5, default mode)
+
+- Added API-free latest-release discovery through GitHub's ordinary redirect,
+  with tag comparison before download so current or newer installations never
+  fetch the source-update zip.
+- Added an app-supplied atomic per-user check-state file, a default 24-hour
+  interval, explicit force checks, source-keyed cache isolation, and persisted
+  `Retry-After`/`X-RateLimit-Reset` backoff for HTTP 403 and 429 responses.
+- Preserved direct/local zip overrides and legacy REST metadata configuration;
+  legacy metadata now also compares `tag_name` before downloading.
+- Added update-available callback timing before remote asset download, installed
+  and target version result metadata, distinct discovery/download errors, and
+  release-tag/manifest-version agreement checks.
+- Added stdlib local HTTP server coverage with exact request counts, including
+  no-download version gates, zero-network throttled launches, force checks,
+  rate-limit persistence, corrupt/missing state, callback ordering, legacy API
+  behavior, direct override isolation, and manifest mismatch refusal.
+- Updated the adoption docs for updater 0.2.0 and recorded that
+  `sleep_scoring` has successfully applied lightweight updates through v0.16.8.
+- Verification:
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m unittest discover -s tests -v`: 34 tests passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m compileall -q desktop_app_source_updater`: passed.
+  - `C:\Users\yzhao\miniconda3\envs\fp_analysis_dist\python.exe -m desktop_app_source_updater.build_update_asset --help`: passed.
+  - `treaty validate .`: not run because the `treaty` command is unavailable
+    in this shell.
+
 ## 2026-07-22
 
 ### Added schema-2 semantic Python config merging (Codex GPT-5, default mode)

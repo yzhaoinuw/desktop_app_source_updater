@@ -31,7 +31,8 @@ External to this repository.
 
 - Re-exports the public runtime API: `UpdateConfig`,
   `StartupUpdateResult`, `run_startup_update`, `format_update_message`,
-  `read_python_assignment_version`, `UpdateError`, and blocked-path defaults.
+  `read_python_assignment_version`, `UpdateError`, the default check interval,
+  and blocked-path defaults.
 - This is the import surface downstream apps should use.
 
 ### 3. Startup Update Runtime
@@ -40,10 +41,20 @@ External to this repository.
 
 - Resolves the installed app version from an explicit value or Python assignment
   in `installed_version_file`.
-- Resolves an update zip from a direct URL, local file path, file URL, or latest
-  GitHub Release metadata plus `asset_prefix`.
+- Prefers API-free latest-release discovery through a HEAD request to GitHub's
+  ordinary `/releases/latest` redirect and derives the versioned asset URL from
+  the discovered tag plus `asset_prefix`.
+- Keeps legacy REST release metadata and direct/local update zip overrides
+  compatible, while comparing discovered tags before any remote asset fetch.
+- Persists app-scoped check intervals and 403/429 backoff atomically in an
+  app-supplied per-user state file; corrupt state fails open and force checks
+  bypass the interval.
+- Calls the optional update-available hook after discovering a newer tag and
+  before downloading/applying its asset, and returns installed/target version
+  metadata with the normal result.
 - Loads and validates `manifest.json`, payload hashes, app name, schema version,
-  allowed paths, compatibility versions, and baseline hashes.
+  release-tag agreement, allowed paths, compatibility versions, and baseline
+  hashes.
 - Supports schema-2 AST-guided merging for one explicitly declared
   user-editable Python config while ordinary source retains whole-file hash
   protection.
@@ -116,8 +127,10 @@ project_root/
 ## Tests And Fixtures
 
 - [`tests/test_core.py`](tests/test_core.py) covers runtime update behavior with
-  temporary app roots, local release zips, release metadata JSON, jump-ahead
-  baselines, blocked paths, and local edit hash mismatches.
+  temporary app roots, local release zips, a stdlib HTTP redirect server with
+  exact request counts, persistent throttling/backoff, force checks, legacy
+  release metadata, jump-ahead baselines, blocked paths, and local edit hash
+  mismatches.
 - [`tests/test_build_update_asset.py`](tests/test_build_update_asset.py) creates
   temporary Git repositories to verify multi-baseline manifest generation and
   schema-2 config assets, plus refusal of unsafe builder inputs and dependency

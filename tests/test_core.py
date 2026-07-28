@@ -1,8 +1,11 @@
 ﻿import hashlib
 import json
 import os
+import threading
+import time
 import unittest
 import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -109,6 +112,133 @@ class ReleaseZipFixture:
         return metadata_path
 
 
+class LocalReleaseServer:
+    def __init__(
+        self,
+        asset_bytes,
+        *,
+        tag_name="v1.0.1",
+        latest_status=302,
+        latest_headers=None,
+        asset_status=200,
+        asset_headers=None,
+        api_status=200,
+        api_headers=None,
+    ):
+        self.asset_bytes = asset_bytes
+        self.tag_name = tag_name
+        self.latest_status = latest_status
+        self.latest_headers = latest_headers or {}
+        self.asset_status = asset_status
+        self.asset_headers = asset_headers or {}
+        self.api_status = api_status
+        self.api_headers = api_headers or {}
+        self.requests = []
+        self.events = []
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_HEAD(self):
+                self._handle_request(send_body=False)
+
+            def do_GET(self):
+                self._handle_request(send_body=True)
+
+            def _handle_request(self, *, send_body):
+                owner.requests.append((self.command, self.path))
+                owner.events.append(f"{self.command} {self.path}")
+                if self.path == "/owner/repo/releases/latest":
+                    headers = dict(owner.latest_headers)
+                    if 300 <= owner.latest_status < 400:
+                        headers.setdefault(
+                            "Location",
+                            f"/owner/repo/releases/tag/{owner.tag_name}",
+                        )
+                    self._send(owner.latest_status, headers, b"", send_body)
+                    return
+
+                if self.path == "/api/repos/owner/repo/releases/latest":
+                    metadata = {
+                        "tag_name": owner.tag_name,
+                        "assets": [
+                            {
+                                "name": f"demo_app_update_{owner.tag_name}.zip",
+                                "browser_download_url": owner.asset_url,
+                            }
+                        ],
+                    }
+                    self._send(
+                        owner.api_status,
+                        owner.api_headers,
+                        json.dumps(metadata).encode("utf-8"),
+                        send_body,
+                    )
+                    return
+
+                if self.path == owner.asset_path:
+                    self._send(
+                        owner.asset_status,
+                        owner.asset_headers,
+                        owner.asset_bytes,
+                        send_body,
+                    )
+                    return
+
+                self._send(404, {}, b"", send_body)
+
+            def _send(self, status, headers, body, send_body):
+                self.send_response(status)
+                for name, value in headers.items():
+                    self.send_header(name, str(value))
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                if send_body and body:
+                    self.wfile.write(body)
+
+            def log_message(self, format, *args):
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(
+            target=self.server.serve_forever,
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
+
+    @property
+    def base_url(self):
+        host, port = self.server.server_address
+        return f"http://{host}:{port}"
+
+    @property
+    def latest_url(self):
+        return f"{self.base_url}/owner/repo/releases/latest"
+
+    @property
+    def api_url(self):
+        return f"{self.base_url}/api/repos/owner/repo/releases/latest"
+
+    @property
+    def asset_path(self):
+        return (
+            f"/owner/repo/releases/download/{self.tag_name}/"
+            f"demo_app_update_{self.tag_name}.zip"
+        )
+
+    @property
+    def asset_url(self):
+        return f"{self.base_url}{self.asset_path}"
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=1)
+
+
 class TestStartupUpdate(unittest.TestCase):
     def test_applies_compatible_release_zip(self):
         with TemporaryDirectory() as temp_dir:
@@ -202,6 +332,295 @@ class TestStartupUpdate(unittest.TestCase):
             requests = [call.args[0] for call in urlopen.call_args_list]
             self.assertEqual("application/vnd.github+json", requests[0].get_header("Accept"))
             self.assertEqual("application/octet-stream", requests[1].get_header("Accept"))
+
+    def test_redirect_discovery_checks_current_version_without_downloading_zip(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.1"\n')
+            update_zip = fixture.build_update_zip()
+            state_file = fixture.root / "state" / "update-check.json"
+
+            with LocalReleaseServer(update_zip.read_bytes()) as server:
+                result = run_startup_update(
+                    self._redirect_config(fixture, server, state_file)
+                )
+
+            self.assertEqual("up-to-date", result.status)
+            self.assertEqual("v1.0.1", result.installed_version)
+            self.assertEqual("v1.0.1", result.target_version)
+            self.assertEqual(
+                [("HEAD", "/owner/repo/releases/latest")],
+                server.requests,
+            )
+
+    def test_redirect_discovery_does_not_download_for_newer_installed_version(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.2"\n')
+            update_zip = fixture.build_update_zip(version="v1.0.1")
+
+            with LocalReleaseServer(update_zip.read_bytes()) as server:
+                result = run_startup_update(
+                    self._redirect_config(
+                        fixture,
+                        server,
+                        fixture.root / "update-check.json",
+                    )
+                )
+
+            self.assertEqual("up-to-date", result.status)
+            self.assertEqual(
+                [("HEAD", "/owner/repo/releases/latest")],
+                server.requests,
+            )
+
+    def test_second_redirect_check_inside_interval_makes_zero_network_requests(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.1"\n')
+            update_zip = fixture.build_update_zip()
+            state_file = fixture.root / "update-check.json"
+
+            with LocalReleaseServer(update_zip.read_bytes()) as server:
+                config = self._redirect_config(fixture, server, state_file)
+                first = run_startup_update(config)
+                second = run_startup_update(config)
+
+            self.assertEqual("up-to-date", first.status)
+            self.assertEqual("up-to-date", second.status)
+            self.assertIn("deferred", second.message)
+            self.assertEqual(
+                [("HEAD", "/owner/repo/releases/latest")],
+                server.requests,
+            )
+
+    def test_redirect_discovery_downloads_only_newer_release_and_notifies_first(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            update_zip = fixture.build_update_zip()
+            state_file = fixture.root / "update-check.json"
+
+            with LocalReleaseServer(update_zip.read_bytes()) as server:
+                config = self._redirect_config(
+                    fixture,
+                    server,
+                    state_file,
+                    on_update_available=lambda installed, target: server.events.append(
+                        f"callback {installed} {target}"
+                    ),
+                )
+                result = run_startup_update(config)
+
+            self.assertEqual("updated", result.status)
+            self.assertEqual("v1.0.0", result.installed_version)
+            self.assertEqual("v1.0.1", result.target_version)
+            self.assertEqual(
+                [
+                    ("HEAD", "/owner/repo/releases/latest"),
+                    ("GET", server.asset_path),
+                ],
+                server.requests,
+            )
+            self.assertEqual(
+                [
+                    "HEAD /owner/repo/releases/latest",
+                    "callback v1.0.0 v1.0.1",
+                    f"GET {server.asset_path}",
+                ],
+                server.events,
+            )
+
+    def test_force_check_bypasses_persistent_interval(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.1"\n')
+            update_zip = fixture.build_update_zip()
+
+            with LocalReleaseServer(update_zip.read_bytes()) as server:
+                config = self._redirect_config(
+                    fixture,
+                    server,
+                    fixture.root / "update-check.json",
+                )
+                run_startup_update(config)
+                forced = run_startup_update(config, force_check=True)
+
+            self.assertEqual("up-to-date", forced.status)
+            self.assertEqual(
+                [
+                    ("HEAD", "/owner/repo/releases/latest"),
+                    ("HEAD", "/owner/repo/releases/latest"),
+                ],
+                server.requests,
+            )
+
+    def test_rate_limit_responses_persist_server_backoff(self):
+        for status, headers, minimum_delay in (
+            (403, {"X-RateLimit-Reset": str(int(time.time()) + 600)}, 500),
+            (429, {"Retry-After": "300"}, 250),
+        ):
+            with self.subTest(status=status):
+                with TemporaryDirectory() as temp_dir:
+                    fixture = ReleaseZipFixture(temp_dir)
+                    fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+                    update_zip = fixture.build_update_zip()
+                    state_file = fixture.root / "update-check.json"
+
+                    with LocalReleaseServer(
+                        update_zip.read_bytes(),
+                        latest_status=status,
+                        latest_headers=headers,
+                    ) as server:
+                        config = self._redirect_config(fixture, server, state_file)
+                        before = time.time()
+                        first = run_startup_update(config)
+                        second = run_startup_update(config)
+
+                    self.assertEqual("failed", first.status)
+                    self.assertIn(f"HTTP {status}", first.message)
+                    self.assertEqual("up-to-date", second.status)
+                    self.assertEqual(
+                        [("HEAD", "/owner/repo/releases/latest")],
+                        server.requests,
+                    )
+                    state = json.loads(state_file.read_text(encoding="utf-8"))
+                    self.assertGreaterEqual(
+                        state["next_check_at"],
+                        before + minimum_delay,
+                    )
+
+    def test_corrupt_or_missing_state_is_ignored_safely(self):
+        for state_contents in (None, "{not json"):
+            with self.subTest(state_contents=state_contents):
+                with TemporaryDirectory() as temp_dir:
+                    fixture = ReleaseZipFixture(temp_dir)
+                    fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.1"\n')
+                    update_zip = fixture.build_update_zip()
+                    state_file = fixture.root / "update-check.json"
+                    if state_contents is not None:
+                        state_file.write_text(state_contents, encoding="utf-8")
+
+                    with LocalReleaseServer(update_zip.read_bytes()) as server:
+                        result = run_startup_update(
+                            self._redirect_config(fixture, server, state_file)
+                        )
+
+                    self.assertEqual("up-to-date", result.status)
+                    self.assertEqual(
+                        [("HEAD", "/owner/repo/releases/latest")],
+                        server.requests,
+                    )
+                    state = json.loads(state_file.read_text(encoding="utf-8"))
+                    self.assertEqual(1, state["schema_version"])
+
+    def test_legacy_api_compares_tag_before_downloading_current_release(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.1"\n')
+            update_zip = fixture.build_update_zip()
+
+            with LocalReleaseServer(update_zip.read_bytes()) as server:
+                config = UpdateConfig(
+                    app_name="demo_app",
+                    app_root=fixture.app_root,
+                    installed_version_file="demo_src/__init__.py",
+                    release_api_url=server.api_url,
+                    asset_prefix="demo_app_update_",
+                    allowed_payload_paths=("demo_src/",),
+                )
+                result = run_startup_update(config)
+
+            self.assertEqual("up-to-date", result.status)
+            self.assertEqual(
+                [("GET", "/api/repos/owner/repo/releases/latest")],
+                server.requests,
+            )
+
+    def test_manifest_version_must_match_discovered_release_tag(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            update_zip = fixture.build_update_zip(version="v1.0.1")
+
+            with LocalReleaseServer(
+                update_zip.read_bytes(),
+                tag_name="v1.0.2",
+            ) as server:
+                result = run_startup_update(
+                    self._redirect_config(
+                        fixture,
+                        server,
+                        fixture.root / "update-check.json",
+                    )
+                )
+
+            self.assertEqual("failed", result.status)
+            self.assertIn("does not match discovered release tag", result.message)
+            self.assertEqual("VALUE = 'old'\n", fixture.read_app_file("demo_src/app.py"))
+
+    def test_direct_local_update_url_bypasses_remote_check_state(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            update_zip = fixture.build_update_zip()
+            state_file = fixture.root / "update-check.json"
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "source": (
+                            "demo_app|redirect|"
+                            "https://example.test/releases/latest|demo_app_update_"
+                        ),
+                        "next_check_at": time.time() + 86400,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = fixture.config(update_zip=update_zip)
+            config = UpdateConfig(
+                **{
+                    **config.__dict__,
+                    "check_state_file": state_file,
+                    "latest_release_url": "https://example.test/releases/latest",
+                }
+            )
+
+            result = run_startup_update(config)
+
+            self.assertEqual("updated", result.status)
+
+    def test_asset_download_failure_is_distinct_and_persists_backoff(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            update_zip = fixture.build_update_zip()
+            state_file = fixture.root / "update-check.json"
+
+            with LocalReleaseServer(
+                update_zip.read_bytes(),
+                asset_status=429,
+                asset_headers={"Retry-After": "300"},
+            ) as server:
+                config = self._redirect_config(fixture, server, state_file)
+                first = run_startup_update(config)
+                second = run_startup_update(config)
+
+            self.assertEqual("failed", first.status)
+            self.assertIn("could not download update asset: HTTP 429", first.message)
+            self.assertEqual("up-to-date", second.status)
+            self.assertEqual(
+                [
+                    ("HEAD", "/owner/repo/releases/latest"),
+                    ("GET", server.asset_path),
+                ],
+                server.requests,
+            )
 
     def test_merges_declared_config_values_and_replaces_ordinary_source(self):
         with TemporaryDirectory() as temp_dir:
@@ -364,6 +783,25 @@ DERIVED = new_runtime_value()
                 "demo_src/app.py": "VALUE = 'new'\n",
                 "demo_src/__init__.py": 'VERSION = "v1.0.1"\n',
             },
+        )
+
+    def _redirect_config(
+        self,
+        fixture,
+        server,
+        state_file,
+        *,
+        on_update_available=None,
+    ):
+        return UpdateConfig(
+            app_name="demo_app",
+            app_root=fixture.app_root,
+            installed_version_file="demo_src/__init__.py",
+            latest_release_url=server.latest_url,
+            asset_prefix="demo_app_update_",
+            allowed_payload_paths=("demo_src/",),
+            check_state_file=state_file,
+            on_update_available=on_update_available,
         )
 
 

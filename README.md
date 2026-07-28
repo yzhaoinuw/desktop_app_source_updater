@@ -12,7 +12,11 @@ run_desktop_app.py
   -> imports the app package from src/, app_src/, fp_analysis_app/, etc.
 ```
 
-The updater checks a GitHub Release asset such as `my_app_update_v1.2.3.zip`, validates its manifest and hashes, and replaces only approved runtime source files before the app imports. Users do not need Git installed.
+The updater checks a GitHub Release asset such as `my_app_update_v1.2.3.zip`,
+validates its manifest and hashes, and replaces only approved runtime source
+files before the app imports. It discovers the latest tag from GitHub's
+ordinary `/releases/latest` redirect, so normal startup checks do not spend
+GitHub REST API quota. Users do not need Git installed.
 
 ## The Short Version
 
@@ -108,26 +112,43 @@ Example launcher pattern:
 
 ```python
 from pathlib import Path
+import os
 import sys
 
 from desktop_app_source_updater import UpdateConfig, format_update_message, run_startup_update
 
 APP_ROOT = Path(__file__).resolve().parent
+USER_STATE_ROOT = Path(
+    os.environ.get("LOCALAPPDATA") or (Path.home() / ".cache")
+)
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
-result = run_startup_update(
-    UpdateConfig(
-        app_name="my_app",
-        app_root=APP_ROOT,
-        installed_version_file="my_app_src/__init__.py",
-        release_api_url="https://api.github.com/repos/me/my_app/releases/latest",
-        asset_prefix="my_app_update_",
-        allowed_payload_paths=("my_app_src/",),
-        skip_update_env="MY_APP_SKIP_UPDATE",
-        update_zip_url_env="MY_APP_UPDATE_ZIP_URL",
-        timeout_env="MY_APP_UPDATE_TIMEOUT_SECONDS",
+def show_update_available(installed_version, target_version):
+    print(
+        f"[startup-update] updating from version "
+        f"{installed_version} to version {target_version}",
+        flush=True,
     )
+
+
+update_config = UpdateConfig(
+    app_name="my_app",
+    app_root=APP_ROOT,
+    installed_version_file="my_app_src/__init__.py",
+    latest_release_url="https://github.com/me/my_app/releases/latest",
+    asset_prefix="my_app_update_",
+    allowed_payload_paths=("my_app_src/",),
+    check_state_file=USER_STATE_ROOT / "my_app" / "update-check.json",
+    skip_update_env="MY_APP_SKIP_UPDATE",
+    update_zip_url_env="MY_APP_UPDATE_ZIP_URL",
+    timeout_env="MY_APP_UPDATE_TIMEOUT_SECONDS",
+    force_check_env="MY_APP_FORCE_UPDATE_CHECK",
+    on_update_available=show_update_available,
+)
+result = run_startup_update(
+    update_config,
+    force_check="--check-update" in sys.argv,
 )
 
 message = format_update_message(result)
@@ -147,16 +168,41 @@ Required choices:
 
 - `app_name`: stable manifest app name, for example `fp_analysis`
 - `app_root`: folder containing the installed launcher and source folder
-- `release_api_url`: latest-release API URL for the app repo, not this updater repo
+- `latest_release_url`: ordinary GitHub URL ending in `/releases/latest` for
+  the app repo, not this updater repo
 - `asset_prefix`: release asset prefix, for example `fp_analysis_update_`
 - `allowed_payload_paths`: source paths the updater may replace, for example `("fp_analysis_app/",)`
 - `installed_version_file` or `installed_version`: how the updater knows the current app version
+- `check_state_file`: app-specific per-user JSON path used for durable check
+  throttling; relative paths resolve under `app_root`, but an absolute
+  per-user path is recommended
 
 Recommended environment variables:
 
 - `skip_update_env`: let developers/users bypass startup updates, for example `MY_APP_SKIP_UPDATE=1`
 - `update_zip_url_env`: let tests point directly at a local zip or test asset
 - `timeout_env`: let troubleshooting override the network timeout
+- `force_check_env`: bypass the normal check interval for an explicit package
+  gate or troubleshooting check
+
+`check_interval_seconds` defaults to 24 hours. After a successful tag check, a
+second launch inside that interval makes no network request. HTTP 403 and 429
+responses persist their `Retry-After` or `X-RateLimit-Reset` backoff in the same
+atomic state file, so repeated launches do not hammer GitHub. Missing or corrupt
+state is ignored safely.
+
+For an explicit check, call
+`run_startup_update(update_config, force_check=True)` or enable the configured
+`force_check_env`. Direct `update_url` and `update_zip_url_env` overrides remain
+available for package gates and tests; they bypass remote discovery and its
+cache. State is also keyed to the configured release source and asset prefix,
+so changing a remote test endpoint is not suppressed by an unrelated cached
+check.
+
+`release_api_url` and `release_api_env` remain supported for existing adopters.
+That legacy mode now reads `tag_name` and compares it with the installed version
+before downloading an asset, but new integrations should prefer
+`latest_release_url` to avoid unauthenticated GitHub REST API rate limits.
 
 The version file should contain a simple assignment that the default regex can read:
 
@@ -183,6 +229,7 @@ python -m desktop_app_source_updater.build_update_asset `
   --from-ref v1.2.2 `
   --installed-baseline-manifest release_baselines/v1.2.2-windows.json `
   --to-ref v1.2.3 `
+  --version v1.2.3 `
   --version-file my_app_src/__init__.py `
   --asset-prefix my_app_update_
 ```
@@ -225,6 +272,7 @@ python -m desktop_app_source_updater.build_update_asset `
   --runtime-path my_app_src `
   --from-ref v1.2.2 `
   --to-ref v1.2.3 `
+  --version v1.2.3 `
   --version-file my_app_src/__init__.py `
   --python-config-merge my_app_src/config.py `
   --editable-assignment SLEEP_SCORING_MODEL `
@@ -260,19 +308,28 @@ this capability to an old packaged installation through a source-only asset.
 
 ### 7. Upload The Zip To The App Release
 
-Attach the generated zip to the app's GitHub Release. The default filename is:
+Attach the generated zip to the app's GitHub Release. API-free redirect
+discovery uses this exact deterministic filename:
 
 ```text
-<asset_prefix><version>.zip
+<asset_prefix><release-tag>.zip
 ```
 
 For example:
 
 ```text
-my_app_update_1.2.3.zip
+my_app_update_v1.2.3.zip
 ```
 
-The runtime finds the latest GitHub Release, chooses the matching zip asset, validates the manifest, and applies it only if the installed version is compatible and local files match the expected baseline.
+The manifest version and release tag must agree, with an optional leading `v`
+treated as equivalent. If the app's version file stores `1.2.3` while the
+GitHub tag is `v1.2.3`, either pass `--version v1.2.3` to the builder or use
+`--output` to give the zip the tag-based filename above.
+
+The runtime discovers the latest GitHub Release tag, compares it with the
+installed version, and downloads the versioned asset only when the tag is
+newer. It then requires the manifest version to agree with the discovered tag,
+validates compatibility and local baselines, and applies the payload.
 
 ## Test Before Shipping
 
@@ -287,6 +344,11 @@ At minimum, test these cases in the app repo:
   ordinary source files normally
 - dependency or packaging changes make the builder refuse a source-only asset
 - `MY_APP_SKIP_UPDATE=1` bypasses the startup update
+- a second ordinary launch inside the check interval makes zero network requests
+- `force_check=True` bypasses the interval
+- current and newer installed versions perform tag discovery but never fetch
+  the update zip
+- HTTP 403/429 responses persist their advertised backoff
 - app still launches normally when GitHub is unreachable
 
 For local tests, `update_zip_url_env` can point directly at a generated zip file so you do not need to publish a real release asset for every test.
@@ -317,10 +379,11 @@ Use app-specific config values:
 - app_name
 - app_root
 - installed_version_file or installed_version
-- release_api_url
+- latest_release_url
 - asset_prefix
 - allowed_payload_paths
-- skip/update/timeout env var names if useful
+- an app-specific per-user check_state_file
+- skip/update/timeout/force-check env var names if useful
 
 Important constraints:
 - This updater is for code-only source updates.
@@ -340,14 +403,21 @@ After wiring it:
 
 ## Troubleshooting
 
-`format_update_message(result)` returns empty text for normal quiet outcomes such as disabled or already up to date. For visible messages:
+`format_update_message(result)` returns empty text for normal quiet outcomes
+such as disabled, throttled, or already up to date. The result also exposes
+backwards-compatible `installed_version` and `target_version` metadata. For
+visible messages:
 
 - `updated`: update applied
 - `skipped`: updater found a reason not to modify local files, often a hash mismatch
 - `blocked`: update is incompatible or includes paths that require a full packaged release
-- `failed`: metadata, download, zip, manifest, or apply step failed
+- `failed`: tag/metadata discovery, asset download, zip, manifest, callback, or
+  apply step failed
 
-Use `skip_update_env` to bypass updates during debugging. Use `update_zip_url_env` to test with a local zip path.
+Discovery and asset-download errors are labeled separately. Use
+`skip_update_env` to bypass updates during debugging,
+`run_startup_update(..., force_check=True)` for an explicit remote check, and
+`update_zip_url_env` to test with a local zip path.
 
 ## Development
 

@@ -10,17 +10,12 @@ threads that are actually in flight or likely to be resumed soon.
 
 ## Downstream Adoption Validation (Codex GPT-5)
 
-Status: pending
+Status: in progress
 
-The package has unit coverage for the runtime updater and release-asset builder,
-but it still needs field validation inside real desktop app launch flows. The
-first known source is `C:\Users\yzhao\python_projects\fp_analysis`, where the
-prototype originated.
-
-Current field evidence: the frozen `sleep_scoring` v0.16.5 executable can query
-the real GitHub latest-release endpoint from a fresh package extraction. The
-first compatible `app_src` update still needs to prove the apply path from that
-baseline.
+The package now has successful field evidence in one real desktop app:
+`sleep_scoring` has applied lightweight source updates through v0.16.8. A
+second adopting app is still needed before broad adoption; the next target is
+`C:\Users\yzhao\python_projects\fp_analysis`, where the prototype originated.
 
 Remaining work:
 
@@ -30,7 +25,10 @@ Remaining work:
   `--from-ref` values when appropriate.
 - Verify that startup update behavior works for a clean compatible install, a
   skipped-release jump, and a local-edit mismatch.
-- Repeat the same adoption check in one additional desktop app.
+- Pin the immutable updater 0.2.0 commit in each app's next full package, supply
+  an app-specific per-user `check_state_file`, migrate normal discovery to
+  `latest_release_url`, and wire explicit/package-gate checks with
+  `force_check=True`.
 - Pin a schema-2-compatible updater revision into a new full downstream package
   before testing Python config merge assets; existing frozen runtimes cannot
   acquire this feature through source-only updates.
