@@ -1,7 +1,7 @@
 # Guidelines and Tips for Agents
 
 Read this file first when joining the repo. Open the linked docs only when the
-task needs them.
+task needs them. Keep this file lean; put detailed guidance in the linked docs.
 
 ## Purpose
 
@@ -53,21 +53,50 @@ and refuses source-only assets when changes require a packaged refresh.
 - `project_overview.md`: active file map and mental model
 - `next_steps.md`: current adoption follow-ups
 - `work_log.md`: recent work and verification
+- `work_log_archive/`: older work-log entries, grouped in five-date chunks
 - `README.md`: adoption, usage, and release asset format
 
-Update `work_log.md` after substantive work and `next_steps.md` when future
-work changes. Verify dated entries with `Get-Date -Format yyyy-MM-dd`; never
-write a future date. `treaty validate` enforces this.
+Update `work_log.md` after substantive work: file edits, meaningful validation
+or debugging, technical decisions, branch/release changes, or reusable findings.
+Include model/mode metadata when available and the exact verification commands
+run. Update `next_steps.md` when future work changes; skip both for trivial
+exchanges or when the user asks to keep work off the record.
 
-Keep the tri-color treaty badge for GitHub; use shields.io only where raw SVG is blocked.
+Keep at most five unique dates in the live work log. Before adding a dated entry,
+run `Get-Date -Format yyyy-MM-dd`; never write a future date. `treaty validate`
+enforces this.
+
+Keep the tri-color treaty badge for GitHub; use shields.io only where raw SVG is
+blocked.
 
 ## Git and Releases
 
-For read-only Git checks, use a per-command `safe.directory` override; change global config only when asked.
+For read-only Git checks, use a per-command `safe.directory` override; change
+global config only when asked.
 
 Before leaving a feature branch, confirm its changes are committed, verified,
-and merged or intentionally parked. Treat commit-plus-push-plus-tag requests as releases: update version/docs/work log,
-run verification, create the tag only after those gates pass, and confirm published branch and tag refs.
+and merged or intentionally parked. Treat commit-plus-push-plus-tag requests as
+releases: update version/docs/work log, run verification, create the tag only
+after those gates pass, and confirm published branch and tag refs.
+
+## Updating the Treaty
+
+Only pull upstream treaty changes when the maintainer asks.
+
+- Start from a clean, git-tracked tree and use a dedicated branch.
+- Run `treaty update --dry-run`, then `treaty update`.
+- Treat the update as a three-way merge. Check `git status` and the unmerged
+  index even if the command reports success.
+- Resolve conflict markers by preserving repo-specific guidance and folding in
+  relevant upstream rules; stage each resolved file.
+- Review the final diff, run `treaty validate .` and the package verification
+  commands above, and do not commit unresolved markers.
+
+## Commit Messages
+
+Use a short title. If one commit contains multiple user-requested changes, add
+flat bullets describing user-visible behavior rather than tests, docs, or
+behind-the-scenes implementation details.
 
 ## Reminders
 
