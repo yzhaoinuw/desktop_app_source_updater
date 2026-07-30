@@ -8,6 +8,44 @@ If today's date already has a `## YYYY-MM-DD` header at the top, add a new `###`
 
 Update this log at the end of any substantive work session unless the user explicitly asks not to document it. Substantive work includes file edits, meaningful validation or debugging, technical decisions or reversals, reusable discoveries, branch/PR/release state changes, or follow-up work that future agents need. Log useful experiments even when the code was reverted; skip casual Q&A, trivial one-off commands, and pure scratch work with no future coordination value.
 
+## 2026-07-30
+
+### Stopped announcing updates that cannot be fetched (Claude)
+
+- Found while reviewing `sleep_scoring` before a release: redirect discovery
+  composes the asset filename from the tag instead of reading a release asset
+  list, so `discovery.asset_url` was never empty and a release without a source
+  update asset produced `failed` with `HTTP 404` — after `on_update_available`
+  had already told the user an update was starting. The REST path never had this
+  behavior because release metadata lists the assets it actually has.
+- Reproduced against the live `yzhaoinuw/sleep_scoring` repo, whose current
+  v0.17.0 release is full-package only. A simulated 0.16.8 install reported
+  `failed / could not download update asset: HTTP 404` and fired the callback.
+  After the fix the same config reports
+  `up-to-date / release v0.17.0 has no matching source update asset` and never
+  fires the callback.
+- Added `_asset_is_available`, a no-redirect HEAD probe used only for composed
+  URLs. A release download URL answers 302 when the asset exists and 404 when it
+  does not, so the status settles existence without fetching a payload. Only a
+  definitive 404/410 answers False; a rejected HEAD or a network error answers
+  True so the download remains the operation that reports real failures and the
+  probe adds no failure mode of its own. The download path handles 404/410 the
+  same way, covering an asset deleted between probe and fetch.
+- Kept the announcement before the download rather than after it. Moving it
+  after would have left the console silent during the slow part; the probe was
+  the way to keep the ordering honest and correct.
+- Added `failure_retry_seconds` (default 1 hour, capped at
+  `check_interval_seconds`). A `failed` run now rewrites the check state with
+  this shorter window instead of leaving the full 24-hour deferral, so a
+  transient download error no longer costs a day. Connection-level failures now
+  persist it too: previously an offline launch wrote no state and paid the full
+  network timeout on every launch. Quota backoff from 403/429 still wins.
+- Verification (env `sleep_scoring_dash3.0` on macOS, not the usual Windows
+  interpreter): `python -m unittest discover -s tests` 39 passed (34 before),
+  `python -m compileall -q desktop_app_source_updater` passed. Two existing
+  tests were updated for the added HEAD probe in their request sequences.
+- Branch `fix/redirect-missing-asset` off `dev`; not pushed.
+
 ## 2026-07-28
 
 ### Integrated updater 0.2.0 and treaty v0.4.1 through dev (Codex GPT-5, default mode)
