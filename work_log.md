@@ -8,6 +8,76 @@ If today's date already has a `## YYYY-MM-DD` header at the top, add a new `###`
 
 Update this log at the end of any substantive work session unless the user explicitly asks not to document it. Substantive work includes file edits, meaningful validation or debugging, technical decisions or reversals, reusable discoveries, branch/PR/release state changes, or follow-up work that future agents need. Log useful experiments even when the code was reverted; skip casual Q&A, trivial one-off commands, and pure scratch work with no future coordination value.
 
+## 2026-07-30
+
+### Stopped announcing updates that cannot be fetched (Claude)
+
+- Found while reviewing `sleep_scoring` before a release: redirect discovery
+  composes the asset filename from the tag instead of reading a release asset
+  list, so `discovery.asset_url` was never empty and a release without a source
+  update asset produced `failed` with `HTTP 404` — after `on_update_available`
+  had already told the user an update was starting. The REST path never had this
+  behavior because release metadata lists the assets it actually has.
+- Reproduced against the live `yzhaoinuw/sleep_scoring` repo, whose current
+  v0.17.0 release is full-package only. A simulated 0.16.8 install reported
+  `failed / could not download update asset: HTTP 404` and fired the callback.
+  After the fix the same config reports
+  `up-to-date / release v0.17.0 has no matching source update asset` and never
+  fires the callback.
+- Added `_asset_is_available`, a no-redirect HEAD probe used only for composed
+  URLs. A release download URL answers 302 when the asset exists and 404 when it
+  does not, so the status settles existence without fetching a payload. Only a
+  definitive 404/410 answers False; a rejected HEAD or a network error answers
+  True so the download remains the operation that reports real failures and the
+  probe adds no failure mode of its own. The download path handles 404/410 the
+  same way, covering an asset deleted between probe and fetch.
+- Kept the announcement before the download rather than after it. Moving it
+  after would have left the console silent during the slow part; the probe was
+  the way to keep the ordering honest and correct.
+- Added `failure_retry_seconds` (default 1 hour, capped at
+  `check_interval_seconds`). A `failed` run now rewrites the check state with
+  this shorter window instead of leaving the full 24-hour deferral, so a
+  transient download error no longer costs a day. Connection-level failures now
+  persist it too: previously an offline launch wrote no state and paid the full
+  network timeout on every launch. Quota backoff from 403/429 still wins.
+- Verification (env `sleep_scoring_dash3.0` on macOS, not the usual Windows
+  interpreter): `python -m unittest discover -s tests` 39 passed (34 before),
+  `python -m compileall -q desktop_app_source_updater` passed. Two existing
+  tests were updated for the added HEAD probe in their request sequences.
+- Branch `fix/redirect-missing-asset` off `dev`, PR #3.
+
+### Review follow-up: UpdateConfig field ordering (Claude)
+
+- Review (Codex GPT-5) flagged that `failure_retry_seconds` had been inserted
+  between `check_interval_seconds` and `force_check_env`, renumbering the
+  positional parameters after it. An audit found all ten `UpdateConfig`
+  construction sites across this repo and `sleep_scoring` use keyword arguments
+  only, with zero positional args anywhere, so nothing could have misbound in
+  practice. Reordering is free, though, and this package is consumed by pinned
+  commit from launchers that ship frozen, so the field moved to the end with a
+  comment explaining why it is not beside `check_interval_seconds`.
+- The audit script first reported only one call site. This repo's sources carry
+  a UTF-8 BOM, so `ast.parse` raised `SyntaxError` and a broad `except` silently
+  skipped every file here. Re-reading with `utf-8-sig` found all ten. Worth
+  remembering when scanning this repo with tooling that assumes plain UTF-8.
+- Added `TestConfigCompatibility`, pinning the historical field order as a
+  prefix and asserting every field after the required pair keeps a default.
+  Confirmed the guard is not vacuous: it fails against the original ordering.
+  Recorded the convention in `AGENTS.md` so the next field addition follows it.
+- Verification: 41 tests passed (39 before), `compileall` passed.
+- Second review pass caught a real gap in that guard: it pinned the field order
+  as a *prefix* ending at `on_update_available`, so the newest field was left
+  unprotected and a future field inserted immediately before
+  `failure_retry_seconds` would have shifted a public positional parameter
+  without failing. Confirmed empirically that this case slipped past the prefix
+  check. The guard now pins the complete constructor order by exact equality,
+  which closes the gap permanently instead of deferring it by one field: a
+  prefix always leaves the most recently added field unguarded. The cost is
+  that appending a field now fails the test until it is added to
+  `PUBLIC_FIELD_ORDER`, which is the intended forcing function for a
+  public-surface change. Verified the guard still fails against this PR's
+  original ordering.
+
 ## 2026-07-28
 
 ### Integrated updater 0.2.0 and treaty v0.4.1 through dev (Codex GPT-5, default mode)

@@ -1,6 +1,8 @@
-﻿import hashlib
+﻿import dataclasses
+import hashlib
 import json
 import os
+import socket
 import threading
 import time
 import unittest
@@ -12,6 +14,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from desktop_app_source_updater import UpdateConfig, run_startup_update
+from desktop_app_source_updater import core
 
 
 def sha256(data):
@@ -419,13 +422,17 @@ class TestStartupUpdate(unittest.TestCase):
             self.assertEqual(
                 [
                     ("HEAD", "/owner/repo/releases/latest"),
+                    ("HEAD", server.asset_path),
                     ("GET", server.asset_path),
                 ],
                 server.requests,
             )
+            # The asset is confirmed to exist before the user is told an update
+            # is coming, and the announcement still precedes the slow download.
             self.assertEqual(
                 [
                     "HEAD /owner/repo/releases/latest",
+                    f"HEAD {server.asset_path}",
                     "callback v1.0.0 v1.0.1",
                     f"GET {server.asset_path}",
                 ],
@@ -612,15 +619,161 @@ class TestStartupUpdate(unittest.TestCase):
                 second = run_startup_update(config)
 
             self.assertEqual("failed", first.status)
+            # A throttled probe cannot prove the asset is missing, so the
+            # download stays the operation that reports the failure.
             self.assertIn("could not download update asset: HTTP 429", first.message)
             self.assertEqual("up-to-date", second.status)
             self.assertEqual(
                 [
                     ("HEAD", "/owner/repo/releases/latest"),
+                    ("HEAD", server.asset_path),
                     ("GET", server.asset_path),
                 ],
                 server.requests,
             )
+
+    def test_release_without_composed_asset_is_up_to_date_and_stays_quiet(self):
+        # A full-package release carries no source update asset. Redirect
+        # discovery composes the asset name from the tag, so the only way to
+        # learn it is absent is to ask before announcing anything.
+        for missing_status in (404, 410):
+            with self.subTest(missing_status=missing_status):
+                with TemporaryDirectory() as temp_dir:
+                    fixture = ReleaseZipFixture(temp_dir)
+                    fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+                    fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+                    update_zip = fixture.build_update_zip()
+                    state_file = fixture.root / "update-check.json"
+                    announcements = []
+
+                    with LocalReleaseServer(
+                        update_zip.read_bytes(),
+                        asset_status=missing_status,
+                    ) as server:
+                        config = self._redirect_config(
+                            fixture,
+                            server,
+                            state_file,
+                            on_update_available=lambda installed, target: announcements.append(
+                                (installed, target)
+                            ),
+                        )
+                        result = run_startup_update(config)
+
+                    self.assertEqual("up-to-date", result.status)
+                    self.assertIn("no matching source update asset", result.message)
+                    self.assertEqual("v1.0.1", result.target_version)
+                    self.assertEqual([], announcements)
+                    # The probe settles it; the asset is never downloaded.
+                    self.assertEqual(
+                        [
+                            ("HEAD", "/owner/repo/releases/latest"),
+                            ("HEAD", server.asset_path),
+                        ],
+                        server.requests,
+                    )
+                    self.assertEqual("VALUE = 'old'\n", fixture.read_app_file("demo_src/app.py"))
+
+    def test_asset_deleted_after_probe_is_reported_as_no_asset(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            update_zip = fixture.build_update_zip()
+
+            with LocalReleaseServer(update_zip.read_bytes()) as server:
+                config = self._redirect_config(
+                    fixture,
+                    server,
+                    fixture.root / "update-check.json",
+                )
+
+                original_probe = core._asset_is_available
+
+                def probe_then_delete(url, timeout_seconds):
+                    available = original_probe(url, timeout_seconds)
+                    server.asset_status = 404
+                    return available
+
+                with patch.object(core, "_asset_is_available", probe_then_delete):
+                    result = run_startup_update(config)
+
+            self.assertEqual("up-to-date", result.status)
+            self.assertIn("no matching source update asset", result.message)
+
+    def test_failed_run_retries_sooner_than_a_clean_check(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            update_zip = fixture.build_update_zip()
+            state_file = fixture.root / "update-check.json"
+
+            with LocalReleaseServer(update_zip.read_bytes(), asset_status=500) as server:
+                config = self._redirect_config(fixture, server, state_file)
+                before = time.time()
+                result = run_startup_update(config)
+
+            self.assertEqual("failed", result.status)
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertGreater(state["next_check_at"], before)
+            self.assertLessEqual(
+                state["next_check_at"],
+                before + core.DEFAULT_FAILURE_RETRY_SECONDS + 5,
+            )
+
+    def test_unreachable_host_persists_backoff_instead_of_retrying_every_launch(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            state_file = fixture.root / "update-check.json"
+
+            # Bind and close a port so the connection is refused rather than
+            # hanging, standing in for a launch with no network.
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                dead_port = probe.getsockname()[1]
+
+            config = UpdateConfig(
+                app_name="demo_app",
+                app_root=fixture.app_root,
+                installed_version_file="demo_src/__init__.py",
+                latest_release_url=f"http://127.0.0.1:{dead_port}/owner/repo/releases/latest",
+                asset_prefix="demo_app_update_",
+                allowed_payload_paths=("demo_src/",),
+                check_state_file=state_file,
+            )
+            before = time.time()
+            first = run_startup_update(config)
+            second = run_startup_update(config)
+
+            self.assertEqual("failed", first.status)
+            self.assertEqual("up-to-date", second.status)
+            self.assertIn("deferred by the configured interval", second.message)
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertLessEqual(
+                state["next_check_at"],
+                before + core.DEFAULT_FAILURE_RETRY_SECONDS + 5,
+            )
+
+    def test_quota_backoff_outlives_the_shorter_failure_retry(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            update_zip = fixture.build_update_zip()
+            state_file = fixture.root / "update-check.json"
+            reset_at = int(time.time()) + core.DEFAULT_FAILURE_RETRY_SECONDS + 3600
+
+            with LocalReleaseServer(
+                update_zip.read_bytes(),
+                latest_status=403,
+                latest_headers={"X-RateLimit-Reset": str(reset_at)},
+            ) as server:
+                result = run_startup_update(
+                    self._redirect_config(fixture, server, state_file)
+                )
+
+            self.assertEqual("failed", result.status)
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(float(reset_at), state["next_check_at"])
 
     def test_merges_declared_config_values_and_replaces_ordinary_source(self):
         with TemporaryDirectory() as temp_dir:
@@ -803,6 +956,72 @@ DERIVED = new_runtime_value()
             check_state_file=state_file,
             on_update_available=on_update_available,
         )
+
+
+class TestConfigCompatibility(unittest.TestCase):
+    """UpdateConfig's field order is a compatibility surface.
+
+    Adopters pin this package by commit and build their own UpdateConfig in a
+    launcher that ships frozen inside a packaged app. Inserting a field
+    renumbers every positional parameter after it, so a positional caller would
+    silently misbind rather than fail. New fields must be appended.
+    """
+
+    # The complete public constructor order, newest field last. This is checked
+    # for exact equality rather than as a prefix: a prefix leaves whichever
+    # field was added most recently unprotected, so inserting a field just
+    # before it would shift a real positional parameter without failing.
+    # Appending here is the deliberate acknowledgment that the surface changed.
+    PUBLIC_FIELD_ORDER = (
+        "app_name",
+        "app_root",
+        "release_api_url",
+        "asset_prefix",
+        "allowed_payload_paths",
+        "installed_version",
+        "installed_version_file",
+        "version_pattern",
+        "update_url",
+        "skip_update_env",
+        "update_zip_url_env",
+        "release_api_env",
+        "asset_prefix_env",
+        "timeout_env",
+        "timeout_seconds",
+        "max_update_bytes",
+        "blocked_path_names",
+        "blocked_path_prefixes",
+        "blocked_path_suffixes",
+        "latest_release_url",
+        "latest_release_env",
+        "check_state_file",
+        "check_interval_seconds",
+        "force_check_env",
+        "on_update_available",
+        "failure_retry_seconds",
+    )
+
+    def test_new_config_fields_are_appended_not_inserted(self):
+        actual_order = tuple(field.name for field in dataclasses.fields(UpdateConfig))
+        self.assertEqual(
+            self.PUBLIC_FIELD_ORDER,
+            actual_order,
+            "UpdateConfig's constructor order is public. Append a new field to "
+            "the end of the dataclass and to PUBLIC_FIELD_ORDER; never insert "
+            "one, which renumbers every positional parameter after it.",
+        )
+
+    def test_every_optional_config_field_keeps_a_default(self):
+        # Appending is only safe while every field after the required pair
+        # still has a default; otherwise adopters break on construction.
+        optional_fields = dataclasses.fields(UpdateConfig)[2:]
+        missing_defaults = [
+            field.name
+            for field in optional_fields
+            if field.default is dataclasses.MISSING
+            and field.default_factory is dataclasses.MISSING
+        ]
+        self.assertEqual([], missing_defaults)
 
 
 if __name__ == "__main__":

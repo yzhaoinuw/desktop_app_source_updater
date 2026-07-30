@@ -48,6 +48,16 @@ The updater must:
 The builder in `build_update_asset.py` accepts repeated `--from-ref` values
 and refuses source-only assets when changes require a packaged refresh.
 
+`UpdateConfig`'s field order is part of the public surface. Adopters pin this
+package by commit and construct the config in a launcher that ships frozen
+inside a packaged app, so inserting a field renumbers every positional
+parameter after it and a positional caller misbinds silently instead of
+failing. Append new fields after the existing ones and keep a default on every
+field after `app_name` and `app_root`; `TestConfigCompatibility` enforces both.
+It pins the complete constructor order, so appending a field also means adding
+it to `PUBLIC_FIELD_ORDER` in that test. That failure is the point: it makes a
+public-surface change deliberate rather than incidental.
+
 ## Docs and Session Hygiene
 
 - `project_overview.md`: active file map and mental model

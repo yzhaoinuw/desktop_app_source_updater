@@ -191,6 +191,12 @@ responses persist their `Retry-After` or `X-RateLimit-Reset` backoff in the same
 atomic state file, so repeated launches do not hammer GitHub. Missing or corrupt
 state is ignored safely.
 
+`failure_retry_seconds` defaults to 1 hour and caps at `check_interval_seconds`.
+A run that ends `failed` rewrites the state with this shorter window, so an
+offline launch or a transient download error is retried well before the next
+ordinary check, without putting the network timeout back on every launch. A
+quota backoff always wins over this shorter retry.
+
 For an explicit check, call
 `run_startup_update(update_config, force_check=True)` or enable the configured
 `force_check_env`. Direct `update_url` and `update_zip_url_env` overrides remain
@@ -330,6 +336,14 @@ The runtime discovers the latest GitHub Release tag, compares it with the
 installed version, and downloads the versioned asset only when the tag is
 newer. It then requires the manifest version to agree with the discovered tag,
 validates compatibility and local baselines, and applies the payload.
+
+A release does not have to carry a source update asset. Because redirect
+discovery composes the filename above rather than reading a release asset list,
+it confirms the asset exists before announcing an update. A newer release
+without one reports `up-to-date` with `no matching source update asset`, and
+`on_update_available` never fires. That keeps full-package-only releases, and
+any later change to the asset naming convention, from making installed apps
+announce an update they cannot fetch.
 
 ## Test Before Shipping
 

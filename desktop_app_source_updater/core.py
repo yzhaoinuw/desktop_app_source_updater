@@ -28,9 +28,12 @@ from .python_config import (
 DEFAULT_TIMEOUT_SECONDS = 6
 DEFAULT_MAX_UPDATE_BYTES = 80 * 1024 * 1024
 DEFAULT_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
+DEFAULT_FAILURE_RETRY_SECONDS = 60 * 60
 MANIFEST_NAME = "manifest.json"
 RELEASE_METADATA_ACCEPT = "application/vnd.github+json"
 UPDATE_ASSET_ACCEPT = "application/octet-stream"
+MISSING_ASSET_STATUSES = frozenset({404, 410})
+METHOD_NOT_SUPPORTED_STATUSES = frozenset({405, 501})
 
 DEFAULT_BLOCKED_PATH_NAMES = frozenset(
     {
@@ -85,6 +88,10 @@ class UpdateConfig:
         repr=False,
         compare=False,
     )
+    # Belongs with check_interval_seconds above, but new fields are appended
+    # here instead: adopters pin this package by commit, and inserting a field
+    # mid-list would renumber every following positional parameter.
+    failure_retry_seconds: int = DEFAULT_FAILURE_RETRY_SECONDS
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,9 @@ class StartupUpdateResult:
 class ReleaseDiscovery:
     tag_name: str
     asset_url: str
+    # True when the URL was composed from the tag rather than read from a
+    # release asset list, so its existence has not been established yet.
+    asset_is_composed: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,6 +172,7 @@ def run_startup_update(
 
         resolved_url = _resolve_direct_update_url(config)
         discovered_tag = ""
+        asset_is_composed = False
         if not resolved_url:
             release_mode, release_url = _resolve_release_source(config)
             if not release_url:
@@ -212,7 +223,14 @@ def run_startup_update(
                     installed_version=installed_version,
                     target_version=target_version,
                 )
-            if not discovery.asset_url:
+            # Redirect discovery composes the asset URL from the tag instead of
+            # reading a release asset list, so confirm the asset exists before
+            # telling the user an update is on the way. A release that ships no
+            # source update asset is a normal outcome, not a failure.
+            if not discovery.asset_url or (
+                discovery.asset_is_composed
+                and not _asset_is_available(discovery.asset_url, timeout_seconds)
+            ):
                 return StartupUpdateResult(
                     "up-to-date",
                     f"release {discovered_tag} has no matching source update asset",
@@ -222,17 +240,29 @@ def run_startup_update(
 
             _notify_update_available(config, installed_version, discovered_tag)
             resolved_url = discovery.asset_url
+            asset_is_composed = discovery.asset_is_composed
 
         with tempfile.TemporaryDirectory(prefix=f"{config.app_name}-update-") as temp_dir:
             update_zip = Path(temp_dir) / "update.zip"
-            update_zip.write_bytes(
-                _read_url_bytes(
+            try:
+                asset_bytes = _read_url_bytes(
                     resolved_url,
                     timeout_seconds,
                     config.max_update_bytes,
                     error_context="could not download update asset",
                 )
-            )
+            except UpdateRequestError as exc:
+                # The asset can still disappear between the availability probe
+                # and this download; report it the same way either path finds it.
+                if not (asset_is_composed and exc.status in MISSING_ASSET_STATUSES):
+                    raise
+                return StartupUpdateResult(
+                    "up-to-date",
+                    f"release {discovered_tag} has no matching source update asset",
+                    installed_version=installed_version,
+                    target_version=target_version,
+                )
+            update_zip.write_bytes(asset_bytes)
 
             package = _load_update_package(update_zip, config)
             target_version = package.version
@@ -292,16 +322,15 @@ def run_startup_update(
                 target_version,
             )
     except UpdateRequestError as exc:
-        if (
-            exc.status in {403, 429}
-            and state_path is not None
-            and source_key
-        ):
-            _write_check_state(
-                state_path,
-                source_key,
-                _retry_at_from_response(exc.headers, time.time(), config.check_interval_seconds),
-            )
+        if state_path is not None and source_key:
+            now = time.time()
+            if exc.status in {403, 429}:
+                # A quota response carries its own, longer, window; never let
+                # the ordinary failure retry shorten it.
+                retry_at = _retry_at_from_response(exc.headers, now, config.check_interval_seconds)
+            else:
+                retry_at = _failure_retry_at(now, config)
+            _write_check_state(state_path, source_key, retry_at)
         return StartupUpdateResult(
             "failed",
             str(exc),
@@ -309,6 +338,8 @@ def run_startup_update(
             target_version=target_version,
         )
     except UpdateError as exc:
+        if state_path is not None and source_key:
+            _write_check_state(state_path, source_key, _failure_retry_at(time.time(), config))
         return StartupUpdateResult(
             "failed",
             str(exc),
@@ -416,7 +447,7 @@ def _discover_release_from_redirect(
             f"{urllib.parse.quote(tag_name, safe='')}/"
             f"{urllib.parse.quote(asset_name, safe='')}"
         )
-    return ReleaseDiscovery(tag_name, asset_url)
+    return ReleaseDiscovery(tag_name, asset_url, asset_is_composed=bool(asset_url))
 
 
 def _discover_release_from_api(
@@ -481,7 +512,7 @@ def _read_latest_release_redirect(url: str, timeout_seconds: int) -> str:
     try:
         return _request_latest_release_location(url, timeout_seconds, method="HEAD")
     except UpdateRequestError as exc:
-        if exc.status not in {405, 501}:
+        if exc.status not in METHOD_NOT_SUPPORTED_STATUSES:
             raise
     return _request_latest_release_location(url, timeout_seconds, method="GET")
 
@@ -512,6 +543,37 @@ def _request_latest_release_location(
     if resolved_url == url:
         raise UpdateError("could not discover latest release tag: latest-release URL did not redirect")
     return resolved_url
+
+
+def _asset_is_available(url: str, timeout_seconds: int) -> bool:
+    """Report whether a composed asset URL resolves, without downloading it.
+
+    A release download URL answers with a redirect to storage when the asset
+    exists and 404 when it does not, so the redirect is deliberately not
+    followed: the status alone settles existence and no payload is fetched.
+
+    Only a definitive missing status answers False. Every other outcome, including
+    a rejected HEAD or a network error, leaves existence unknown and answers True
+    so the download stays the operation that reports the real failure. This probe
+    guards the update-available announcement; it must not add a failure mode of
+    its own.
+    """
+    if not _is_remote_url(url):
+        return True
+
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": UPDATE_ASSET_ACCEPT, "User-Agent": "desktop-app-source-updater"},
+        method="HEAD",
+    )
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    try:
+        with opener.open(request, timeout=timeout_seconds):
+            return True  # only 2xx reaches here; redirects raise below
+    except urllib.error.HTTPError as exc:
+        return exc.code not in MISSING_ASSET_STATUSES
+    except (OSError, ValueError, urllib.error.URLError):
+        return True
 
 
 def _release_tag_and_repo_url(release_url: str) -> tuple[str, str]:
@@ -639,6 +701,18 @@ def _write_check_state(state_path: Path, source_key: str, next_check_at: float) 
                 temp_path.unlink()
             except OSError:
                 pass
+
+
+def _failure_retry_at(now: float, config: UpdateConfig) -> float:
+    """Return the next check time after a failed run.
+
+    A failed run has already paid its network cost, so the state is rewritten
+    with a shorter window than a clean check: an offline launch or a transient
+    download error should not cost a full interval, but repeating the attempt
+    on every launch would put the timeout back on the startup path.
+    """
+    retry_seconds = min(max(0, config.failure_retry_seconds), max(0, config.check_interval_seconds))
+    return now + retry_seconds
 
 
 def _retry_at_from_response(
