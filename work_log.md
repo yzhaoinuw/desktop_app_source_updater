@@ -65,6 +65,18 @@ Update this log at the end of any substantive work session unless the user expli
   Confirmed the guard is not vacuous: it fails against the original ordering.
   Recorded the convention in `AGENTS.md` so the next field addition follows it.
 - Verification: 41 tests passed (39 before), `compileall` passed.
+- Second review pass caught a real gap in that guard: it pinned the field order
+  as a *prefix* ending at `on_update_available`, so the newest field was left
+  unprotected and a future field inserted immediately before
+  `failure_retry_seconds` would have shifted a public positional parameter
+  without failing. Confirmed empirically that this case slipped past the prefix
+  check. The guard now pins the complete constructor order by exact equality,
+  which closes the gap permanently instead of deferring it by one field: a
+  prefix always leaves the most recently added field unguarded. The cost is
+  that appending a field now fails the test until it is added to
+  `PUBLIC_FIELD_ORDER`, which is the intended forcing function for a
+  public-surface change. Verified the guard still fails against this PR's
+  original ordering.
 
 ## 2026-07-28
 

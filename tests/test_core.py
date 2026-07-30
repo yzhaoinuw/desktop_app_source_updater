@@ -967,7 +967,12 @@ class TestConfigCompatibility(unittest.TestCase):
     silently misbind rather than fail. New fields must be appended.
     """
 
-    HISTORICAL_FIELD_ORDER = (
+    # The complete public constructor order, newest field last. This is checked
+    # for exact equality rather than as a prefix: a prefix leaves whichever
+    # field was added most recently unprotected, so inserting a field just
+    # before it would shift a real positional parameter without failing.
+    # Appending here is the deliberate acknowledgment that the surface changed.
+    PUBLIC_FIELD_ORDER = (
         "app_name",
         "app_root",
         "release_api_url",
@@ -993,15 +998,17 @@ class TestConfigCompatibility(unittest.TestCase):
         "check_interval_seconds",
         "force_check_env",
         "on_update_available",
+        "failure_retry_seconds",
     )
 
     def test_new_config_fields_are_appended_not_inserted(self):
         actual_order = tuple(field.name for field in dataclasses.fields(UpdateConfig))
         self.assertEqual(
-            self.HISTORICAL_FIELD_ORDER,
-            actual_order[: len(self.HISTORICAL_FIELD_ORDER)],
-            "UpdateConfig fields must keep their historical order. Append new "
-            "fields after the existing ones instead of inserting them.",
+            self.PUBLIC_FIELD_ORDER,
+            actual_order,
+            "UpdateConfig's constructor order is public. Append a new field to "
+            "the end of the dataclass and to PUBLIC_FIELD_ORDER; never insert "
+            "one, which renumbers every positional parameter after it.",
         )
 
     def test_every_optional_config_field_keeps_a_default(self):
