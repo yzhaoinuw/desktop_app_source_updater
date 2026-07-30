@@ -1,4 +1,5 @@
-﻿import hashlib
+﻿import dataclasses
+import hashlib
 import json
 import os
 import socket
@@ -955,6 +956,65 @@ DERIVED = new_runtime_value()
             check_state_file=state_file,
             on_update_available=on_update_available,
         )
+
+
+class TestConfigCompatibility(unittest.TestCase):
+    """UpdateConfig's field order is a compatibility surface.
+
+    Adopters pin this package by commit and build their own UpdateConfig in a
+    launcher that ships frozen inside a packaged app. Inserting a field
+    renumbers every positional parameter after it, so a positional caller would
+    silently misbind rather than fail. New fields must be appended.
+    """
+
+    HISTORICAL_FIELD_ORDER = (
+        "app_name",
+        "app_root",
+        "release_api_url",
+        "asset_prefix",
+        "allowed_payload_paths",
+        "installed_version",
+        "installed_version_file",
+        "version_pattern",
+        "update_url",
+        "skip_update_env",
+        "update_zip_url_env",
+        "release_api_env",
+        "asset_prefix_env",
+        "timeout_env",
+        "timeout_seconds",
+        "max_update_bytes",
+        "blocked_path_names",
+        "blocked_path_prefixes",
+        "blocked_path_suffixes",
+        "latest_release_url",
+        "latest_release_env",
+        "check_state_file",
+        "check_interval_seconds",
+        "force_check_env",
+        "on_update_available",
+    )
+
+    def test_new_config_fields_are_appended_not_inserted(self):
+        actual_order = tuple(field.name for field in dataclasses.fields(UpdateConfig))
+        self.assertEqual(
+            self.HISTORICAL_FIELD_ORDER,
+            actual_order[: len(self.HISTORICAL_FIELD_ORDER)],
+            "UpdateConfig fields must keep their historical order. Append new "
+            "fields after the existing ones instead of inserting them.",
+        )
+
+    def test_every_optional_config_field_keeps_a_default(self):
+        # Appending is only safe while every field after the required pair
+        # still has a default; otherwise adopters break on construction.
+        optional_fields = dataclasses.fields(UpdateConfig)[2:]
+        missing_defaults = [
+            field.name
+            for field in optional_fields
+            if field.default is dataclasses.MISSING
+            and field.default_factory is dataclasses.MISSING
+        ]
+        self.assertEqual([], missing_defaults)
 
 
 if __name__ == "__main__":

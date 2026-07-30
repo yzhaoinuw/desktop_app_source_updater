@@ -44,7 +44,27 @@ Update this log at the end of any substantive work session unless the user expli
   interpreter): `python -m unittest discover -s tests` 39 passed (34 before),
   `python -m compileall -q desktop_app_source_updater` passed. Two existing
   tests were updated for the added HEAD probe in their request sequences.
-- Branch `fix/redirect-missing-asset` off `dev`; not pushed.
+- Branch `fix/redirect-missing-asset` off `dev`, PR #3.
+
+### Review follow-up: UpdateConfig field ordering (Claude)
+
+- Review (Codex GPT-5) flagged that `failure_retry_seconds` had been inserted
+  between `check_interval_seconds` and `force_check_env`, renumbering the
+  positional parameters after it. An audit found all ten `UpdateConfig`
+  construction sites across this repo and `sleep_scoring` use keyword arguments
+  only, with zero positional args anywhere, so nothing could have misbound in
+  practice. Reordering is free, though, and this package is consumed by pinned
+  commit from launchers that ship frozen, so the field moved to the end with a
+  comment explaining why it is not beside `check_interval_seconds`.
+- The audit script first reported only one call site. This repo's sources carry
+  a UTF-8 BOM, so `ast.parse` raised `SyntaxError` and a broad `except` silently
+  skipped every file here. Re-reading with `utf-8-sig` found all ten. Worth
+  remembering when scanning this repo with tooling that assumes plain UTF-8.
+- Added `TestConfigCompatibility`, pinning the historical field order as a
+  prefix and asserting every field after the required pair keeps a default.
+  Confirmed the guard is not vacuous: it fails against the original ordering.
+  Recorded the convention in `AGENTS.md` so the next field addition follows it.
+- Verification: 41 tests passed (39 before), `compileall` passed.
 
 ## 2026-07-28
 

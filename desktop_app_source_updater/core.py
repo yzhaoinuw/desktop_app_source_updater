@@ -82,13 +82,16 @@ class UpdateConfig:
     latest_release_env: str | None = None
     check_state_file: str | os.PathLike[str] | None = None
     check_interval_seconds: int = DEFAULT_CHECK_INTERVAL_SECONDS
-    failure_retry_seconds: int = DEFAULT_FAILURE_RETRY_SECONDS
     force_check_env: str | None = None
     on_update_available: Callable[[str, str], None] | None = field(
         default=None,
         repr=False,
         compare=False,
     )
+    # Belongs with check_interval_seconds above, but new fields are appended
+    # here instead: adopters pin this package by commit, and inserting a field
+    # mid-list would renumber every following positional parameter.
+    failure_retry_seconds: int = DEFAULT_FAILURE_RETRY_SECONDS
 
 
 @dataclass(frozen=True)
