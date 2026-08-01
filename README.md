@@ -11,6 +11,7 @@ allowed source paths.
 
 - [Installation](#installation)
 - [Usage](#usage)
+- [Real-World Examples](#real-world-examples)
 - [Configuration](#configuration)
 - [Build and Publish an Update](#build-and-publish-an-update)
 - [Test an Integration](#test-an-integration)
@@ -109,6 +110,17 @@ important ordering is:
 The first release that adds this dependency must be a full packaged release.
 Once users have that updater-enabled build, later compatible releases can use
 small source-update assets.
+
+## Real-World Examples
+
+These maintained desktop apps use this package in their startup launchers:
+
+- [`sleep_scoring`](https://github.com/yzhaoinuw/sleep_scoring) applies
+  lightweight release updates to its `app_src/` runtime before launching the
+  packaged sleep-scoring application.
+- [`fp_analysis`](https://github.com/yzhaoinuw/fp_analysis) updates its
+  `fp_analysis_app/` runtime while enforcing additional app-specific boundaries
+  for local data and generated assets.
 
 ## Configuration
 

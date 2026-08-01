@@ -10,6 +10,21 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-08-01
 
+### Added real-world adopter links to the README (Codex GPT-5, default mode)
+
+- Added a dedicated README section linking to the `sleep_scoring` and
+  `fp_analysis` repositories as maintained examples of launcher-based source
+  updates.
+- Described each app's actual updateable runtime path and kept the examples in
+  the primary adoption flow immediately after Usage.
+- Verification:
+  - Confirmed both GitHub repository URLs from their local `origin` remotes.
+  - Inspected both active launchers and the `fp_analysis` update configuration.
+  - README contents-link check: all 11 links resolved and both adopter links
+    were present.
+  - `C:\Users\yzhao\python_projects\agent_collab_treaty\.venv\Scripts\treaty.exe validate .`: passed.
+  - `git diff --check`: passed.
+
 ### Reorganized the README around adoption workflow (Codex GPT-5, default mode)
 
 - Replaced the opening conceptual essays with a concise package description,
