@@ -21,6 +21,7 @@ allowed source paths.
 - [Development](#development)
 - [Agent Adoption Prompt](#agent-adoption-prompt)
 - [Citation](#citation)
+- [Acknowledgment](#acknowledgment)
 - [License](#license)
 
 ## Installation
@@ -396,6 +397,12 @@ Each release is archived on Zenodo. Cite the concept DOI
 to the newest release; use a release's own DOI only when you need to pin the exact
 version you ran.
 -->
+
+## Acknowledgment
+
+This package was extracted from software developed for research supported in
+part by the BRAIN Initiative of the US National Institutes of Health
+(U19NS128613).
 
 ## License
 
