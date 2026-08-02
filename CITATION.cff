@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+title: "desktop_app_source_updater: A dependency-free source updater for packaged Python desktop applications"
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+authors:
+  - given-names: Yue
+    family-names: Zhao
+    affiliation: "University of Rochester, Rochester, NY, USA"
+    orcid: "https://orcid.org/0000-0002-0819-5012"
+abstract: >-
+  A small standard-library-only updater that lets an installed Python desktop
+  application update its own source code without reinstallation. The
+  application ships a stable launcher alongside updateable source files; at
+  startup the updater checks a GitHub Release asset, validates the asset's
+  manifest and file hashes, and replaces only approved runtime source files
+  before the application package is imported. It discovers the newest release
+  through GitHub's ordinary redirect for the latest release rather than the
+  REST API, so routine startup checks do not consume API quota, and end users
+  need neither Git nor a Python installation. It was written to solve a
+  recurring problem in scientific laboratories, where software is installed on
+  shared computers that the maintainer cannot revisit to apply a fix.
+repository-code: "https://github.com/yzhaoinuw/desktop_app_source_updater"
+license: MIT
+version: 0.2.0
+keywords:
+  - software updates
+  - desktop application
+  - Python packaging
+  - software deployment
+  - research software
+# TODO after the first GitHub Release is published (which is what triggers
+# Zenodo to mint the DOI):
+#   1. Add the Zenodo *concept* DOI here as `doi: "10.5281/zenodo.XXXXXXXX"`.
+#      The concept DOI resolves to the newest release, so it stays correct
+#      without further editing; per-release DOIs are reachable from that record.
+#   2. Add the matching DOI badge to README.md (see the Citation section).
+#   3. Set `date-released:` and confirm `version:` matches the tag released.

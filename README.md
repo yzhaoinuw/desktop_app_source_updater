@@ -20,6 +20,8 @@ allowed source paths.
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [Agent Adoption Prompt](#agent-adoption-prompt)
+- [Citation](#citation)
+- [License](#license)
 
 ## Installation
 
@@ -379,3 +381,22 @@ Then build a test asset, run the app's tests, and verify successful clean and
 skipped-release updates, safe local-edit refusal, throttled repeated startup,
 and normal launch when GitHub is unavailable.
 ```
+
+## Citation
+
+If you use this package in research, use GitHub's **Cite this repository** button
+or the [CITATION.cff](CITATION.cff) file to obtain an APA or BibTeX entry.
+
+<!-- After the first GitHub Release is published and Zenodo mints the DOI, add the
+     DOI badge under the title at the top of this README, and replace this comment
+     block with the paragraph below, filling in the concept DOI:
+
+Each release is archived on Zenodo. Cite the concept DOI
+[10.5281/zenodo.XXXXXXXX](https://doi.org/10.5281/zenodo.XXXXXXXX), which resolves
+to the newest release; use a release's own DOI only when you need to pin the exact
+version you ran.
+-->
+
+## License
+
+Released under the MIT License — see [`LICENSE`](LICENSE).
