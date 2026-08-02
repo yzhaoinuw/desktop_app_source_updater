@@ -1,6 +1,7 @@
 # Desktop App Source Updater
 
 [![Agent Collab Treaty](https://raw.githubusercontent.com/yzhaoinuw/agent_collab_treaty/main/assets/treaty-adopted.svg)](https://github.com/yzhaoinuw/agent_collab_treaty)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21763329.svg)](https://doi.org/10.5281/zenodo.21763329)
 
 `desktop_app_source_updater` lets packaged Python desktop apps apply small,
 code-only updates from GitHub Releases before the app source is imported. It
@@ -388,15 +389,10 @@ and normal launch when GitHub is unavailable.
 If you use this package in research, use GitHub's **Cite this repository** button
 or the [CITATION.cff](CITATION.cff) file to obtain an APA or BibTeX entry.
 
-<!-- After the first GitHub Release is published and Zenodo mints the DOI, add the
-     DOI badge under the title at the top of this README, and replace this comment
-     block with the paragraph below, filling in the concept DOI:
-
 Each release is archived on Zenodo. Cite the concept DOI
-[10.5281/zenodo.XXXXXXXX](https://doi.org/10.5281/zenodo.XXXXXXXX), which resolves
+[10.5281/zenodo.21763329](https://doi.org/10.5281/zenodo.21763329), which resolves
 to the newest release; use a release's own DOI only when you need to pin the exact
 version you ran.
--->
 
 ## Acknowledgment
 
