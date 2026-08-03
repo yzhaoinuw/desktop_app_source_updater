@@ -10,6 +10,7 @@ allowed source paths.
 
 ## Content Overview
 
+- [How This Compares](#how-this-compares)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Real-World Examples](#real-world-examples)
@@ -24,6 +25,32 @@ allowed source paths.
 - [Citation](#citation)
 - [Acknowledgment](#acknowledgment)
 - [License](#license)
+
+## How This Compares
+
+Most update tools for packaged Python apps replace the whole frozen bundle:
+
+- [PyUpdater](https://github.com/Digital-Sapphire/PyUpdater), the older
+  standard for PyInstaller apps, is archived and unmaintained. Each update
+  shipped a new copy of the full application.
+- [tufup](https://github.com/dennisvang/tufup), its recommended successor, is
+  actively maintained and signs updates using The Update Framework (TUF). It
+  ships the application as whole-bundle archives (full or binary patch), and
+  it requires generating and protecting signing keys.
+
+This package occupies a different niche: it updates only the app's own Python
+source files and leaves the frozen bundle — the interpreter and all compiled
+dependencies — untouched. Updates are small (a zip of changed source files,
+not the whole app), publishing one is a single GitHub Release asset, and
+applying one needs nothing outside the standard library. The trade-offs are
+explicit:
+
+- When dependencies, packaging, or the interpreter change, you still publish
+  a full packaged release; see
+  [Update Scope and Safety](#update-scope-and-safety).
+- There is no cryptographic signing. The trust model is an HTTPS connection
+  to your own repository's GitHub Releases. If your threat model requires
+  signed updates, use tufup instead.
 
 ## Installation
 
