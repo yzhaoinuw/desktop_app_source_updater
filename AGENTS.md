@@ -49,7 +49,7 @@ The builder in `build_update_asset.py` accepts repeated `--from-ref` values
 and refuses source-only assets when changes require a packaged refresh.
 
 `UpdateConfig`'s field order is part of the public surface. Adopters pin this
-package by commit and construct the config in a launcher that ships frozen
+package by version or commit and construct the config in a launcher that ships frozen
 inside a packaged app, so inserting a field renumbers every positional
 parameter after it and a positional caller misbinds silently instead of
 failing. Append new fields after the existing ones and keep a default on every
@@ -88,6 +88,20 @@ Before leaving a feature branch, confirm its changes are committed, verified,
 and merged or intentionally parked. Treat commit-plus-push-plus-tag requests as
 releases: update version/docs/work log, run verification, create the tag only
 after those gates pass, and confirm published branch and tag refs.
+
+A release that changes the published package also updates `version` in
+`pyproject.toml` and `version`/`date-released` in `CITATION.cff`, then ships to
+PyPI:
+
+```powershell
+python -m build
+python -m twine check --strict dist/*
+python -m twine upload dist/*
+```
+
+Build in a clean tree with no stale `dist/`. A PyPI version can never be
+re-uploaded, so verify on TestPyPI (`--repository testpypi`) when anything about
+the metadata is uncertain. Never commit `dist/`.
 
 ## Updating the Treaty
 

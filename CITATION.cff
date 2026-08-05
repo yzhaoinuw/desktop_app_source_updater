@@ -21,7 +21,7 @@ abstract: >-
   shared computers that the maintainer cannot revisit to apply a fix.
 repository-code: "https://github.com/yzhaoinuw/desktop_app_source_updater"
 license: MIT
-version: 0.2.0
+version: 0.3.0
 keywords:
   - software updates
   - desktop application
@@ -31,4 +31,4 @@ keywords:
 # Zenodo concept DOI. It resolves to the newest release, so it stays correct
 # without editing; the per-release DOIs are reachable from that record.
 doi: "10.5281/zenodo.21763329"
-date-released: "2026-08-02"
+date-released: "2026-08-05"

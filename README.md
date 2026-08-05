@@ -8,8 +8,14 @@ code-only updates from GitHub Releases before the app source is imported. It
 verifies the release and local files, then atomically updates only explicitly
 allowed source paths.
 
+It was built for apps frozen with PyInstaller, where shipping a one-line fix
+otherwise means rebuilding the bundle and redistributing the whole installer.
+Nothing in the package depends on PyInstaller, though: it works for any Python
+desktop app that ships a stable launcher beside plain, updateable source files.
+
 ## Content Overview
 
+- [Common Questions](#common-questions)
 - [How This Compares](#how-this-compares)
 - [Installation](#installation)
 - [Usage](#usage)
@@ -25,6 +31,36 @@ allowed source paths.
 - [Citation](#citation)
 - [Acknowledgment](#acknowledgment)
 - [License](#license)
+
+## Common Questions
+
+### How do I update a PyInstaller app without rebuilding it?
+
+Ship the app's Python source as plain files next to the frozen launcher instead
+of inside the bundle, and call this package from that launcher before the source
+is imported. It downloads a zip of only the changed source files from your
+GitHub Release and swaps them in, so a fix reaches users without a new build or
+a new installer. See [Usage](#usage) for the launcher pattern; changes to
+dependencies, packaging, or the interpreter still need a full packaged release,
+as described in [Update Scope and Safety](#update-scope-and-safety).
+
+### Can I keep my `.py` files outside the frozen bundle and update only those?
+
+Yes — that arrangement is what this package assumes. The frozen bundle holds the
+interpreter and the compiled dependencies and is never touched;
+`allowed_payload_paths` names the source directories an update may change, and
+anything outside them is refused. See [Configuration](#configuration) for the
+fields and [Update Scope and Safety](#update-scope-and-safety) for what is
+blocked.
+
+### Do I need code signing or an update server?
+
+Neither. Updates are ordinary GitHub Release assets fetched over HTTPS from your
+own repository, so there is no server to run and no signing keys to generate or
+protect. The trade-off is that the trust model is your GitHub account and TLS
+rather than a signature over the payload —
+[How This Compares](#how-this-compares) says when to reach for a signing-based
+updater instead.
 
 ## How This Compares
 
@@ -57,20 +93,28 @@ explicit:
 Python 3.10 or newer is required. The package has no runtime dependencies
 outside the Python standard library.
 
-Until the package is published on PyPI, install it from GitHub:
-
 ```powershell
-python -m pip install "desktop-app-source-updater @ git+https://github.com/yzhaoinuw/desktop_app_source_updater.git@main"
+python -m pip install desktop-app-source-updater
 ```
 
-Or add the same direct reference to the app's dependency file:
+Pin an exact version in the app's dependency file. `UpdateConfig`'s field order
+is part of the public surface, and a launcher frozen into a packaged app cannot
+be corrected after the fact, so adopting apps should know which revision they
+shipped:
 
 ```text
-desktop-app-source-updater @ git+https://github.com/yzhaoinuw/desktop_app_source_updater.git@main
+desktop-app-source-updater==0.3.0
+```
+
+Installing straight from GitHub still works, and pins a commit or tag rather
+than a release:
+
+```text
+desktop-app-source-updater @ git+https://github.com/yzhaoinuw/desktop_app_source_updater.git@v0.3.0
 ```
 
 Bundle this dependency into the app's next full packaged release. End-user
-machines do not need Git or a clone of this repository.
+machines do not need Git, pip, or a clone of this repository.
 
 ## Usage
 
@@ -390,9 +434,9 @@ The following prompt can be pasted into an adopting app repository:
 ```text
 Adopt desktop_app_source_updater in this app.
 
-Treat it as an external Python dependency from GitHub:
+Treat it as an external Python dependency, pinned to an exact version:
 
-desktop-app-source-updater @ git+https://github.com/yzhaoinuw/desktop_app_source_updater.git@main
+desktop-app-source-updater==0.3.0
 
 First read this repo's AGENTS.md and project docs. Identify the stable launcher,
 active app source package, version source, packaging workflow, and GitHub repo
@@ -414,7 +458,9 @@ and normal launch when GitHub is unavailable.
 ## Citation
 
 If you use this package in research, use GitHub's **Cite this repository** button
-or the [CITATION.cff](CITATION.cff) file to obtain an APA or BibTeX entry.
+or the
+[CITATION.cff](https://github.com/yzhaoinuw/desktop_app_source_updater/blob/main/CITATION.cff)
+file to obtain an APA or BibTeX entry.
 
 Each release is archived on Zenodo. Cite the concept DOI
 [10.5281/zenodo.21763329](https://doi.org/10.5281/zenodo.21763329), which resolves
@@ -429,4 +475,5 @@ part by the BRAIN Initiative of the US National Institutes of Health
 
 ## License
 
-Released under the MIT License — see [`LICENSE`](LICENSE).
+Released under the MIT License — see
+[`LICENSE`](https://github.com/yzhaoinuw/desktop_app_source_updater/blob/main/LICENSE).

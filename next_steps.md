@@ -5,18 +5,18 @@ threads that are actually in flight or likely to be resumed soon.
 
 ## Currently Hot
 
-- [Publish to PyPI](#publish-to-pypi-claude-fable-5): make the package
-  `pip install`-able. Handed off 2026-08-05.
-- [Make the README findable](#make-the-readme-findable-claude-fable-5): the
-  README never says "PyInstaller." Handed off 2026-08-05.
+- [Publish to PyPI](#publish-to-pypi-claude-fable-5): everything is built and
+  verified; the upload itself is blocked on the maintainer's PyPI account.
 - [Downstream adoption validation](#downstream-adoption-validation-codex-gpt-5):
   prove the updater in at least two real desktop apps before broad adoption.
 
 ## Publish To PyPI (claude-fable-5)
 
-Status: handed off 2026-08-05, not started. Decided by the maintainer; the
-alternatives in [Distribution And Release Polish](#distribution-and-release-polish)
-are settled by this.
+Status: **prepared 2026-08-05, blocked on the maintainer.** Everything in the
+repository is done and verified; what remains needs a PyPI account, which only
+the maintainer can create. Decided by the maintainer; the alternatives in
+[Distribution And Release Polish](#distribution-and-release-polish) are settled
+by this.
 
 Why now, and why it is ahead of the other promotion work: this package's
 audience mostly arrives by asking a question, and increasingly they ask an AI
@@ -32,100 +32,71 @@ The name `desktop-app-source-updater` was free on PyPI as of 2026-08-05
 (pypi.org returns 404 for both spellings). Re-check before assuming — names are
 not reserved.
 
-Remaining work:
+Done on 2026-08-05, on `main`:
 
-- **Merge the `dev` branch first.** `origin/dev` is one commit ahead of
-  `origin/main` (`8f0a106 Add a How This Compares section to the README`) and
-  nothing else differs. It has been waiting since 2026-08-03 for the
-  maintainer's look at the rendered page. The README becomes the PyPI project
-  page, so this should land before the upload rather than after.
-- **Add the metadata that a package page needs.** `pyproject.toml` already has
-  the name, version, MIT license, classifiers, and an empty dependency list.
-  Missing: a `[project.urls]` table (Homepage, Repository, Issues,
-  Documentation) — this is what fills the sidebar links on the PyPI page and is
-  a large part of why a package page is worth having — and `keywords`, which
-  should carry the same terms as the GitHub topics (`pyinstaller`,
-  `auto-update`, `updater`, `desktop-app`, `github-releases`).
-- **Decide the version to publish.** Recommendation: bump to `0.3.0` and cut a
-  matching GitHub Release, so the README changes and the new metadata ship
-  together, the Zenodo archive picks the release up and keeps the DOI in step,
-  and the `0.2.0` tag stays as the honest record of the pre-PyPI state. A PyPI
-  version can never be re-uploaded, so any metadata correction after the fact
-  costs a version number either way. Publishing `0.2.0` as-is is the
-  alternative if the maintainer prefers the PyPI version to match what is
-  already archived.
-- **Check how the README renders as the project page.** `readme = "README.md"`
-  means PyPI renders it as the long description. Relative links resolve against
-  PyPI, not GitHub, so any relative link to a file in the repo breaks there;
-  in-page anchors and the absolute badge URLs are fine. Run
-  `python -m build` then `twine check dist/*`.
-- **Upload to TestPyPI first**, install from it into a clean environment, and
-  confirm the console script `desktop-app-source-update-asset` is on the path.
-  Then upload to PyPI.
-- **Update the README's Installation section afterward.** It currently opens
-  with "Until the package is published on PyPI, install it from GitHub" — that
-  sentence and the `git+https://` recipe become the fallback, not the headline.
-  Keep the direct-reference form documented, because pinning by commit is still
-  how downstream apps adopt this package (see the `UpdateConfig` field-order
-  contract in `AGENTS.md`).
-- **Update `CITATION.cff`** (`version`, `date-released`) as part of the release,
-  the same way the other repos do it.
+- **Merged `dev`.** `8f0a106 Add a How This Compares section to the README` is
+  on `main`; the branch is now fully merged.
+- **Added the metadata a package page needs.** `[project.urls]` (Homepage,
+  Repository, Documentation, Issues), `keywords` matching the GitHub topics,
+  and classifiers for audience, OS, topic, and Python 3.13.
+- **Bumped to `0.3.0`** in `pyproject.toml`, with `version` and
+  `date-released` updated in `CITATION.cff`.
+- **Modernized the license metadata to PEP 639** — `license = "MIT"` plus
+  `license-files`, and dropped the deprecated
+  `License :: OSI Approved :: MIT License` classifier. The old
+  `license = { text = "MIT" }` table is deprecated and slated for removal in
+  February 2027; setuptools warned about both forms on every build. Needed
+  `setuptools>=77` in `[build-system]`. The build is now warning-free.
+- **Fixed the two relative README links** (`CITATION.cff` and `LICENSE`) that
+  would have 404'd on the PyPI page, since relative links there resolve against
+  PyPI rather than GitHub. All 22 in-page anchors survive PyPI's renderer,
+  which prefixes both heading ids and body hrefs with `user-content-`
+  consistently. Both badges survive its HTML sanitization.
+- **Rewrote the Installation section** to lead with
+  `pip install desktop-app-source-updater`, keep the `git+https://` form as the
+  commit/tag-pinning fallback, and recommend an exact `==0.3.0` pin because of
+  the `UpdateConfig` field-order contract. The Agent Adoption Prompt now hands
+  adopters the version pin instead of the Git reference.
+- **Added a PyPI release recipe to `AGENTS.md`** under Git and Releases.
+- **Closed the "Make the README findable" thread** in the same pass, since the
+  README is the PyPI project page and the two threads touched the same file.
+  The README on `main` previously never used the word "PyInstaller" or
+  "frozen." It now names PyInstaller in the second paragraph as the case this
+  was built for — while keeping the accurate general claim, because there is no
+  PyInstaller dependency — and carries a Common Questions section answering
+  "How do I update a PyInstaller app without rebuilding it?", "Can I keep my
+  `.py` files outside the frozen bundle and update only those?", and "Do I need
+  code signing or an update server?" Each answer links into the section that
+  covers it, and the no-signing trade-off stays as prominent as before.
 
-What only the maintainer can do: create the PyPI account if there is not one,
-and either issue an API token for a manual `twine upload` or configure Trusted
-Publishing for a GitHub Actions workflow. The token route is simpler for a
-first manual upload; Trusted Publishing is worth it only once releases are
-automated, and this project has no CI workflow yet.
+What is left, and why it is blocked: **the maintainer needs a PyPI account.**
+Nothing else stands in the way — `python -m build` and
+`twine check --strict dist/*` both pass, and installing the built wheel into a
+clean venv puts `desktop-app-source-update-asset` on the path and reports
+version `0.3.0`.
+
+Once the account exists, issue an API token and run, from a clean tree:
+
+```powershell
+python -m build
+python -m twine check --strict dist/*
+python -m twine upload --repository testpypi dist/*   # optional dry run
+python -m twine upload dist/*
+```
+
+Trusted Publishing is the better long-term answer but needs a GitHub Actions
+workflow to exist, and this project has none yet; see
+[Distribution And Release Polish](#distribution-and-release-polish).
+
+Then finish the release: tag `v0.3.0` and cut the matching GitHub Release so
+Zenodo archives it and the concept DOI stays in step.
 
 Definition of done:
 
 - `pip install desktop-app-source-updater` works from a clean environment.
 - The PyPI page shows the README with working links and a sidebar pointing at
   the repository and issues.
-- The README no longer apologizes for not being on PyPI.
-
-## Make The README Findable (claude-fable-5)
-
-Status: handed off 2026-08-05, not started. Free to do, and it improves the
-value of everything else — the PyPI page, the forum post, and any later
-article all send readers to this README.
-
-**The specific finding that prompted this, checked 2026-08-05: the README on
-`main` does not contain the word "PyInstaller" anywhere. Nor "frozen."** The
-GitHub description says PyInstaller and the unmerged `dev` section mentions it
-twice, but the page itself never does. PyInstaller is the single most likely
-word in the question someone types when they need this package. Search engines
-and AI assistants both work by matching the wording of a question against the
-text of a page, so a page that never uses the term will not be returned for it,
-no matter how well it solves the problem.
-
-Remaining work:
-
-- **Say "PyInstaller" in the opening paragraph**, naming it as the case this
-  was built for while keeping the accurate general claim — the package is
-  framework-agnostic and works for any Python desktop app that ships a stable
-  launcher beside plain source. Do not overcorrect into implying a PyInstaller
-  dependency; there is none, which is why the repo is deliberately not tagged
-  `dash` or tied to a packager.
-- **Add a short question-and-answer block near the top**, above or just below
-  Content Overview, with the questions as headings in the words people actually
-  use, each answered in two or three sentences with a link into the section
-  that covers it. The answers already exist in the README; this is rephrasing,
-  not new material. The three to start with:
-  - "How do I update a PyInstaller app without rebuilding it?"
-  - "Can I keep my `.py` files outside the frozen bundle and update only
-    those?"
-  - "Do I need code signing or an update server?" (the honest answer is no to
-    both, and the trade-off is already written in Update Scope and Safety and
-    in the `dev` branch's How This Compares section)
-- Keep the Content Overview list in sync with any new headings.
-
-Definition of done:
-
-- Someone who searches for the phrase in any of those three questions would
-  find a page that visibly answers it.
-- No claim in the new text overstates what the package does; the safety limits
-  and the no-signing trade-off stay as prominent as they are now.
+- The `v0.3.0` tag and GitHub Release exist and Zenodo has picked them up.
 
 ## Downstream Adoption Validation (Codex GPT-5)
 

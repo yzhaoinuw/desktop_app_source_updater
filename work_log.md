@@ -10,6 +10,68 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-08-05
 
+### Prepared the 0.3.0 PyPI release and made the README findable (claude-opus-5, default mode)
+
+- **Executed both threads handed off earlier today.** Everything in the repo is
+  done; the upload is blocked only on the maintainer creating a PyPI account.
+  The maintainer chose 0.3.0 over republishing 0.2.0, and chose to stop before
+  any upload.
+- **Merged `dev` into `main`** (`8f0a106`, the How This Compares section). The
+  branch had been waiting since 2026-08-03; the README becomes the PyPI project
+  page, so it had to land first.
+- **Bumped to 0.3.0** in `pyproject.toml` and `CITATION.cff` (`version` and
+  `date-released`). Version lives in exactly those two files — nothing in the
+  package declares `__version__`, so `importlib.metadata` is the only runtime
+  source.
+- **Added the package-page metadata**: `[project.urls]` with Homepage,
+  Repository, Documentation, and Issues; `keywords` matching the GitHub topics;
+  and classifiers for development status, audience, OS, topic, and Python 3.13.
+- **Modernized the license metadata to PEP 639.** `license = { text = "MIT" }`
+  and the `License :: OSI Approved :: MIT License` classifier are both
+  deprecated, and setuptools warned about them four times per build; the table
+  form is slated for removal in February 2027. Replaced with
+  `license = "MIT"` plus `license-files = ["LICENSE"]`, which needed
+  `setuptools>=77` in `[build-system]` (was `>=68`). The wheel now carries
+  `License-Expression: MIT` and bundles `LICENSE` under `dist-info/licenses/`.
+  Doing this before the first upload matters because a PyPI version can never
+  be re-uploaded.
+- **Fixed two relative README links** (`CITATION.cff`, `LICENSE`) that would
+  have 404'd on PyPI, where relative links resolve against PyPI rather than
+  GitHub. Rendered the README through PyPI's own `readme_renderer` to confirm
+  the rest: all 22 in-page anchors resolve, because the renderer prefixes both
+  heading ids and body hrefs with `user-content-` consistently, and both badges
+  survive its HTML sanitization. Preview written to the session scratchpad, not
+  committed.
+- **Rewrote Installation** to lead with `pip install desktop-app-source-updater`
+  and recommend an exact `==0.3.0` pin, since `UpdateConfig`'s field order is a
+  public contract and a launcher frozen into a packaged app cannot be corrected
+  after the fact. Kept the `git+https://` form as the commit/tag-pinning
+  fallback. The Agent Adoption Prompt now hands adopters the version pin.
+- **Made the README findable.** It previously contained neither "PyInstaller"
+  nor "frozen" anywhere. Added a second opening paragraph naming PyInstaller as
+  the case this was built for without implying a dependency, and a Common
+  Questions section with three question-shaped headings, each linking into the
+  section that answers it.
+- **Added a PyPI release recipe to `AGENTS.md`** under Git and Releases, and
+  corrected the field-order note to say adopters pin by version *or* commit.
+- Confirmed the name is still unclaimed on both indexes. Note for whoever
+  checks next: `curl` against `pypi.org/project/<name>/` now returns **200 with
+  a bot-challenge page**, not 404, so it no longer distinguishes taken from
+  free. Use the JSON API — `pypi.org/pypi/<name>/json` returns
+  `{"message": "Not Found"}` — which is what confirmed both PyPI and TestPyPI.
+- Verification:
+  - Run on macOS with miniconda Python 3.13.11; `build` and `twine` were
+    installed into a scratchpad venv rather than the conda base.
+  - `python -m build`: clean, zero warnings after the PEP 639 change.
+  - `twine check --strict dist/*`: PASSED for both the wheel and the sdist.
+  - Wheel installed into a fresh venv: `desktop-app-source-update-asset` is on
+    the path and `--help` runs; `importlib.metadata.version` reports `0.3.0`;
+    all 11 public names still export.
+  - `python -m unittest discover -s tests`: 41 tests, OK.
+  - `python -m compileall -q desktop_app_source_updater`: passed.
+  - `python -m desktop_app_source_updater.build_update_asset --help`: passed.
+  - README link audit: 2 relative links found and fixed, 22/22 anchors resolve.
+
 ### Handed off two threads: PyPI publishing and README findability (claude-fable-5)
 
 - **No code changed in this session.** The work was done in `project_ideas`,
