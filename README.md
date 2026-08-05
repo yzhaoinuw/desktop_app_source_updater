@@ -3,118 +3,53 @@
 [![Agent Collab Treaty](https://raw.githubusercontent.com/yzhaoinuw/agent_collab_treaty/main/assets/treaty-adopted.svg)](https://github.com/yzhaoinuw/agent_collab_treaty)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21763329.svg)](https://doi.org/10.5281/zenodo.21763329)
 
-`desktop_app_source_updater` lets packaged Python desktop apps apply small,
-code-only updates from GitHub Releases before the app source is imported. It
-verifies the release and local files, then atomically updates only explicitly
-allowed source paths.
+`desktop_app_source_updater` lets a packaged Python desktop app update its own
+source code from a GitHub Release, without rebuilding or reinstalling the app. It
+verifies the release and the installed files, then atomically replaces only the
+source paths you allow.
 
 It was built for apps frozen with PyInstaller, where shipping a one-line fix
-otherwise means rebuilding the bundle and redistributing the whole installer.
-Nothing in the package depends on PyInstaller, though: it works for any Python
-desktop app that ships a stable launcher beside plain, updateable source files.
+otherwise means rebuilding the bundle and redistributing the installer. Nothing
+in the package depends on PyInstaller: it works for any Python desktop app that
+ships a stable launcher beside plain, updateable source files.
 
 ## Content Overview
 
-- [Common Questions](#common-questions)
-- [How This Compares](#how-this-compares)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Real-World Examples](#real-world-examples)
+- [Common Questions](#common-questions)
 - [Configuration](#configuration)
 - [Build and Publish an Update](#build-and-publish-an-update)
-- [Test an Integration](#test-an-integration)
-- [Advanced Configuration](#advanced-configuration)
 - [Update Scope and Safety](#update-scope-and-safety)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Agent Adoption Prompt](#agent-adoption-prompt)
+- [Reference](#reference) — release checks, multiple baselines, config merging,
+  verification, troubleshooting, development
+- [Adopting This in an App](#adopting-this-in-an-app)
 - [Citation](#citation)
 - [Acknowledgment](#acknowledgment)
 - [License](#license)
 
-## Common Questions
-
-### How do I update a PyInstaller app without rebuilding it?
-
-Ship the app's Python source as plain files next to the frozen launcher instead
-of inside the bundle, and call this package from that launcher before the source
-is imported. It downloads a zip of only the changed source files from your
-GitHub Release and swaps them in, so a fix reaches users without a new build or
-a new installer. See [Usage](#usage) for the launcher pattern; changes to
-dependencies, packaging, or the interpreter still need a full packaged release,
-as described in [Update Scope and Safety](#update-scope-and-safety).
-
-### Can I keep my `.py` files outside the frozen bundle and update only those?
-
-Yes — that arrangement is what this package assumes. The frozen bundle holds the
-interpreter and the compiled dependencies and is never touched;
-`allowed_payload_paths` names the source directories an update may change, and
-anything outside them is refused. See [Configuration](#configuration) for the
-fields and [Update Scope and Safety](#update-scope-and-safety) for what is
-blocked.
-
-### Do I need code signing or an update server?
-
-Neither. Updates are ordinary GitHub Release assets fetched over HTTPS from your
-own repository, so there is no server to run and no signing keys to generate or
-protect. The trade-off is that the trust model is your GitHub account and TLS
-rather than a signature over the payload —
-[How This Compares](#how-this-compares) says when to reach for a signing-based
-updater instead.
-
-## How This Compares
-
-Most update tools for packaged Python apps replace the whole frozen bundle:
-
-- [PyUpdater](https://github.com/Digital-Sapphire/PyUpdater), the older
-  standard for PyInstaller apps, is archived and unmaintained. Each update
-  shipped a new copy of the full application.
-- [tufup](https://github.com/dennisvang/tufup), its recommended successor, is
-  actively maintained and signs updates using The Update Framework (TUF). It
-  ships the application as whole-bundle archives (full or binary patch), and
-  it requires generating and protecting signing keys.
-
-This package occupies a different niche: it updates only the app's own Python
-source files and leaves the frozen bundle — the interpreter and all compiled
-dependencies — untouched. Updates are small (a zip of changed source files,
-not the whole app), publishing one is a single GitHub Release asset, and
-applying one needs nothing outside the standard library. The trade-offs are
-explicit:
-
-- When dependencies, packaging, or the interpreter change, you still publish
-  a full packaged release; see
-  [Update Scope and Safety](#update-scope-and-safety).
-- There is no cryptographic signing. The trust model is an HTTPS connection
-  to your own repository's GitHub Releases. If your threat model requires
-  signed updates, use tufup instead.
-
 ## Installation
 
-Python 3.10 or newer is required. The package has no runtime dependencies
-outside the Python standard library.
+Python 3.10 or newer. No runtime dependencies outside the standard library.
 
 ```powershell
 python -m pip install desktop-app-source-updater
 ```
 
-Pin an exact version in the app's dependency file. `UpdateConfig`'s field order
+Pin an exact version in the app's dependency file — `UpdateConfig`'s field order
 is part of the public surface, and a launcher frozen into a packaged app cannot
-be corrected after the fact, so adopting apps should know which revision they
-shipped:
+be corrected afterward:
 
 ```text
 desktop-app-source-updater==0.3.0
-```
 
-Installing straight from GitHub still works, and pins a commit or tag rather
-than a release:
-
-```text
+# or pin a commit or tag instead of a release:
 desktop-app-source-updater @ git+https://github.com/yzhaoinuw/desktop_app_source_updater.git@v0.3.0
 ```
 
 Bundle this dependency into the app's next full packaged release. End-user
-machines do not need Git, pip, or a clone of this repository.
+machines need neither Git nor a clone of this repository.
 
 ## Usage
 
@@ -175,16 +110,12 @@ from my_app_src.app import main
 main()
 ```
 
-Replace the example names and paths with values for the adopting app. The
-important ordering is:
-
-1. Import and run `desktop_app_source_updater`.
-2. Display any nonempty update message.
-3. Import and start the app runtime.
+Replace the example names and paths with the adopting app's own. What matters is
+the order: run the update, display any nonempty message, then import the app
+runtime.
 
 The first release that adds this dependency must be a full packaged release.
-Once users have that updater-enabled build, later compatible releases can use
-small source-update assets.
+Later compatible releases can then ship small source-update assets.
 
 ## Real-World Examples
 
@@ -197,9 +128,50 @@ These maintained desktop apps use this package in their startup launchers:
   `fp_analysis_app/` runtime while enforcing additional app-specific boundaries
   for local data and generated assets.
 
+## Common Questions
+
+### How do I update a PyInstaller app without rebuilding it?
+
+Ship the app's Python source as plain files beside the frozen launcher instead of
+inside the bundle, and call this package from that launcher before the source is
+imported. It downloads a zip of only the changed files from your GitHub Release
+and swaps them in, so a fix reaches users without a new build or installer.
+Changes to dependencies, packaging, or the interpreter still need a full packaged
+release — see [Update Scope and Safety](#update-scope-and-safety).
+
+### Can I keep my `.py` files outside the frozen bundle and update only those?
+
+Yes; that arrangement is what this package assumes. The frozen bundle holds the
+interpreter and the compiled dependencies and is never touched, while
+`allowed_payload_paths` names the source directories an update may change.
+Anything outside them is refused.
+
+### Do I need code signing or an update server?
+
+Neither. Updates are ordinary GitHub Release assets fetched over HTTPS from your
+own repository, so there is no server to run and no signing keys to generate or
+protect. The trade-off is that the trust model is your GitHub account and TLS
+rather than a signature over the payload.
+
+### How does this compare to PyUpdater and tufup?
+
+Both replace the whole frozen bundle.
+[PyUpdater](https://github.com/Digital-Sapphire/PyUpdater), long the standard for
+PyInstaller apps, is archived and unmaintained; its successor
+[tufup](https://github.com/dennisvang/tufup) is actively maintained and ships
+full or patched bundle archives signed with The Update Framework.
+
+This package fills a different niche. It updates only the app's own Python source
+and leaves the frozen bundle — the interpreter and every compiled dependency —
+untouched, so an update is a zip of changed files rather than a copy of the
+application, and applying one needs nothing outside the standard library. In
+exchange there is no cryptographic signing, and dependency or packaging changes
+still require a full packaged release. If your threat model requires signed
+updates, use tufup.
+
 ## Configuration
 
-The main `UpdateConfig` values are:
+The values most integrations set:
 
 | Field | Purpose |
 | --- | --- |
@@ -209,13 +181,10 @@ The main `UpdateConfig` values are:
 | `latest_release_url` | The adopting app's GitHub URL ending in `/releases/latest`. |
 | `asset_prefix` | Prefix for source-update assets, such as `my_app_update_`. |
 | `allowed_payload_paths` | Source directories that an update may change. |
-| `check_state_file` | App-specific, per-user JSON file for durable check throttling. |
+| `check_state_file` | App-specific, per-user JSON file for durable check throttling. Use an absolute path; relative paths resolve under `app_root`. |
 
-The default version-file pattern reads a simple assignment such as:
-
-```python
-VERSION = "1.2.3"
-```
+The default version-file pattern reads a simple assignment such as
+`VERSION = "1.2.3"`.
 
 Optional environment-variable fields make development and support easier:
 
@@ -225,9 +194,6 @@ Optional environment-variable fields make development and support easier:
 | `update_zip_url_env` | Test a local zip or prerelease asset directly. |
 | `timeout_env` | Override the network timeout. |
 | `force_check_env` | Bypass the normal check interval. |
-
-Use an absolute, per-user path for `check_state_file`. Relative paths resolve
-under `app_root`.
 
 ## Build and Publish an Update
 
@@ -246,52 +212,60 @@ python -m desktop_app_source_updater.build_update_asset `
   --asset-prefix my_app_update_
 ```
 
-Use one `--from-ref` for every prior release that may update directly to the
-new version. The builder validates the changed paths and refuses to create a
+Use one `--from-ref` for every prior release that may update directly to the new
+version. The builder validates the changed paths and refuses to create a
 source-only asset when the release requires a full packaged update.
 
-Attach the generated zip to the adopting app's GitHub Release using this exact
-filename:
+Attach the generated zip to the app's GitHub Release under exactly
+`<asset_prefix><release-tag>.zip` — `my_app_update_v1.2.3.zip` for the example
+above. The manifest version and the release tag must agree, with a leading `v`
+treated as equivalent; pass `--version` or `--output` when the version file
+stores `1.2.3` and the tag is `v1.2.3`.
 
-```text
-<asset_prefix><release-tag>.zip
-```
+## Update Scope and Safety
 
-For the example above:
+Source-update assets are for changes to approved runtime source files. Publish a
+full packaged release when a change affects dependencies, packaging, build files,
+environments, data, file deletions, or file renames.
 
-```text
-my_app_update_v1.2.3.zip
-```
+Before applying an asset, the updater checks every listed file against the
+baselines recorded in the manifest. If any file has unknown bytes, the entire
+asset is skipped and nothing changes; this protects local patches and prevents
+partial updates across mutually dependent modules. Files not listed in the asset
+are never inspected or changed. The one exception to whole-file baseline
+replacement is the declared config file described under
+[User-Editable Python Configuration](#user-editable-python-configuration).
 
-The manifest version and release tag must agree; an optional leading `v` is
-treated as equivalent. If the version file stores `1.2.3` and the GitHub tag is
-`v1.2.3`, pass `--version v1.2.3` or set the tag-based filename with `--output`.
+Updates are prepared before mutation and applied through a backup-and-rollback
+transaction. The updater also blocks payload paths outside
+`allowed_payload_paths` and rejects dependency, packaging, build, cache, archive,
+and local-data paths.
 
-## Test an Integration
+## Reference
 
-Before shipping, verify that:
+Details worth looking up once an integration is working.
 
-- a clean compatible installation updates successfully;
-- a skipped-release installation updates when all required `--from-ref` values
-  are included;
-- an unknown local edit skips the asset without changing any payload file;
-- dependency or packaging changes make the builder refuse a source-only asset;
-- the configured skip variable bypasses the update;
-- a second ordinary launch inside the check interval makes no network request;
-- a forced check bypasses the interval;
-- current and newer installed versions never fetch the update zip;
-- the app still launches when GitHub is unreachable.
+### Release Checks
 
-For local tests, point `update_zip_url_env` at a generated zip file. This tests
-the apply path without publishing a GitHub Release.
+With `latest_release_url`, the updater discovers the newest tag through GitHub's
+ordinary `/releases/latest` redirect, compares it with the installed version, and
+checks for the deterministic asset filename before announcing or downloading an
+update. A release without that asset is treated as up to date.
 
-## Advanced Configuration
+Successful checks are cached for `check_interval_seconds`, which defaults to 24
+hours. Failed checks retry after `failure_retry_seconds`, which defaults to 1
+hour. HTTP 403 and 429 backoff is persisted and takes precedence. Direct zip
+overrides bypass discovery and its cache.
+
+`release_api_url` and `release_api_env` remain available for existing adopters,
+but new integrations should use `latest_release_url` to avoid unauthenticated
+GitHub REST API rate limits.
 
 ### Multiple Installed Baselines
 
 Use repeatable `--installed-baseline-manifest` arguments when installations
-reporting the same version can legitimately contain different bytes, such as
-LF Git blobs and CRLF files from a Windows package:
+reporting the same version can legitimately contain different bytes, such as LF
+Git blobs and CRLF files from a Windows package:
 
 ```powershell
 python -m desktop_app_source_updater.build_update_asset `
@@ -305,9 +279,9 @@ python -m desktop_app_source_updater.build_update_asset `
   --asset-prefix my_app_update_
 ```
 
-Each manifest names a version already supplied through `--from-ref` and maps
-every changed runtime path to its installed SHA-256. Use `null` only when the
-file was absent:
+Each manifest names a version already supplied through `--from-ref` and maps every
+changed runtime path to its installed SHA-256. Use `null` only when the file was
+absent:
 
 ```json
 {
@@ -319,9 +293,9 @@ file was absent:
 }
 ```
 
-The builder deduplicates equivalent hashes and preserves version-specific
-baselines where needed. It refuses baseline combinations that the manifest
-schema cannot represent safely.
+The builder deduplicates equivalent hashes, preserves version-specific baselines
+where needed, and refuses combinations the manifest schema cannot represent
+safely.
 
 ### User-Editable Python Configuration
 
@@ -344,57 +318,39 @@ python -m desktop_app_source_updater.build_update_asset `
 The downloaded file remains the template. For allowlisted assignments, values
 already present in the installed file are preserved, missing values receive the
 downloaded defaults, and literal dictionaries merge recursively. Imports,
-functions, comments, ordering, removed settings, and undeclared assignments
-come from the downloaded file.
+functions, comments, ordering, removed settings, and undeclared assignments come
+from the downloaded file.
 
 Both files are parsed without being imported or executed. Invalid Python,
 duplicate or unsupported assignments, and nonliteral editable values fail the
 entire update before mutation.
 
 The adopting app must first ship a full release containing a schema-2-compatible
-updater. Older packaged updaters reject schema-2 assets.
+updater; older packaged updaters reject schema-2 assets.
 
-## Update Scope and Safety
+### Verifying an Integration
 
-Source-update assets are intended for changes to approved runtime source files.
-Publish a full packaged release when a change affects dependencies, packaging,
-build files, environments, data, file deletions, or file renames.
+Before shipping, confirm that:
 
-Before applying an asset, the updater checks every listed ordinary file against
-the baselines recorded in the manifest. If any file has unknown bytes, the
-entire asset is skipped and all files remain unchanged. This protects local
-patches and prevents partial updates across mutually dependent modules.
+- a clean compatible installation updates successfully;
+- a skipped-release installation updates when all required `--from-ref` values
+  are included;
+- an unknown local edit skips the asset without changing any payload file;
+- dependency or packaging changes make the builder refuse a source-only asset;
+- the configured skip variable bypasses the update;
+- a second ordinary launch inside the check interval makes no network request;
+- a forced check bypasses the interval;
+- current and newer installed versions never fetch the update zip;
+- the app still launches when GitHub is unreachable.
 
-Files not listed in the asset are not inspected or changed. The schema-2 merge
-described above is the only exception to whole-file baseline replacement, and
-it applies only to its declared file and assignment allowlist.
+Point `update_zip_url_env` at a generated zip to exercise the apply path locally
+without publishing a GitHub Release.
 
-Updates are prepared before mutation and applied through a backup-and-rollback
-transaction. The updater also blocks payload paths outside
-`allowed_payload_paths` and rejects dependency, packaging, build, cache,
-archive, and local-data paths.
-
-### Release Checks
-
-With `latest_release_url`, the updater discovers the newest tag through
-GitHub's ordinary `/releases/latest` redirect, compares it with the installed
-version, and checks for the deterministic asset filename before announcing or
-downloading an update. A release without that asset is treated as up to date.
-
-Successful checks are cached for `check_interval_seconds`, which defaults to
-24 hours. Failed checks retry after `failure_retry_seconds`, which defaults to
-1 hour. HTTP 403 and 429 backoff is persisted and takes precedence. Direct zip
-overrides bypass discovery and its cache.
-
-`release_api_url` and `release_api_env` remain available for existing adopters,
-but new integrations should use `latest_release_url` to avoid unauthenticated
-GitHub REST API rate limits.
-
-## Troubleshooting
+### Troubleshooting
 
 `format_update_message(result)` is empty for quiet outcomes such as disabled,
-throttled, or already up to date. For other outcomes, inspect `result.status`
-and `result.reason`:
+throttled, or already up to date. For other outcomes, inspect `result.status` and
+`result.reason`:
 
 | Status | Meaning |
 | --- | --- |
@@ -403,8 +359,8 @@ and `result.reason`:
 | `blocked` | The asset was incompatible or contained disallowed changes. |
 | `failed` | Discovery, download, validation, callback, or application failed. |
 
-The result also exposes `installed_version` and `target_version`. Discovery and
-asset-download errors are labeled separately.
+The result also exposes `installed_version` and `target_version`, and labels
+discovery and asset-download errors separately.
 
 For debugging:
 
@@ -414,7 +370,7 @@ For debugging:
 - use `force_check_env` for the same behavior without a code change;
 - use `update_zip_url_env` to test a local zip or explicit asset URL.
 
-## Development
+### Development
 
 Use Python 3.10 or newer:
 
@@ -427,32 +383,19 @@ python -m desktop_app_source_updater.build_update_asset --help
 The public API is exported from `desktop_app_source_updater/__init__.py`; the
 runtime implementation is in `desktop_app_source_updater/core.py`.
 
-## Agent Adoption Prompt
+## Adopting This in an App
 
-The following prompt can be pasted into an adopting app repository:
+The integration is mechanical enough that a capable coding agent can do it from a
+short instruction. Paste this into the adopting app's repository:
 
 ```text
-Adopt desktop_app_source_updater in this app.
+Adopt desktop-app-source-updater in this app. Add it as a pinned dependency, then
+call run_startup_update(UpdateConfig(...)) from the stable launcher, before the
+app's own source package is imported.
 
-Treat it as an external Python dependency, pinned to an exact version:
-
-desktop-app-source-updater==0.3.0
-
-First read this repo's AGENTS.md and project docs. Identify the stable launcher,
-active app source package, version source, packaging workflow, and GitHub repo
-that owns the app's Releases.
-
-Call run_startup_update(UpdateConfig(...)) in the stable launcher before the
-app runtime is imported. Configure app_name, app_root, installed_version_file
-or installed_version, latest_release_url, asset_prefix, allowed_payload_paths,
-an app-specific per-user check_state_file, and useful skip/update/timeout/force
-environment-variable names.
-
-Bundle the updater in a full packaged release before publishing source-update
-assets. Update the app's dependency, packaging, README, and release guidance.
-Then build a test asset, run the app's tests, and verify successful clean and
-skipped-release updates, safe local-edit refusal, throttled repeated startup,
-and normal launch when GitHub is unavailable.
+Read this repo to find the launcher, the updateable source package, and the
+version file. Bundle the updater in a full packaged release before publishing any
+source-update asset.
 ```
 
 ## Citation
@@ -469,9 +412,8 @@ version you ran.
 
 ## Acknowledgment
 
-This package was extracted from software developed for research supported in
-part by the BRAIN Initiative of the US National Institutes of Health
-(U19NS128613).
+This package was extracted from software developed for research supported in part
+by the BRAIN Initiative of the US National Institutes of Health (U19NS128613).
 
 ## License
 

@@ -10,6 +10,48 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-08-05
 
+### Restructured the README around the adoption path (claude-opus-5, default mode)
+
+- **Maintainer's read of the pushed README: it felt unfocused**, despite the
+  Content Overview. Three specific objections, all acted on.
+- **Moved Common Questions and How This Compares below Usage.** They had been
+  sitting between the opening and Installation, breaking the path a new reader
+  wants — install, wire it up, see it working. Position costs almost nothing for
+  search: what gets matched is heading text and body text, and the snippet comes
+  from the opening paragraph, where PyInstaller already appears. The page now
+  reads Installation → Usage → Real-World Examples → Common Questions.
+- **Folded How This Compares into Common Questions** as a fourth question,
+  "How does this compare to PyUpdater and tufup?", which is closer to how people
+  actually ask it and removes a second adjacent section.
+- **Grouped the look-it-up material under a single `## Reference`** with six
+  subsections: Release Checks, Multiple Installed Baselines, User-Editable
+  Python Configuration, Verifying an Integration (was Test an Integration),
+  Troubleshooting, Development. Top-level sections went from 17 to 13.
+- **Kept Update Scope and Safety in the main flow** rather than moving it into
+  Reference. It is not look-it-up material — it is what tells an adopter their
+  change *cannot* ship as a source update, and burying it would make the package
+  look more capable than it is. The maintainer agreed when this was raised.
+- **Cut the agent adoption prompt from 21 lines to 7** and renamed the section
+  to Adopting This in an App. The maintainer's point: a capable agent works out
+  the install and integration from a short instruction, so enumerating every
+  `UpdateConfig` field and every verification step in the prompt was wasted
+  text. It now states the two things an agent cannot infer — pin the dependency,
+  and call `run_startup_update` before the app's own source is imported.
+- **Redundancy pass** over the rest: merged the two dependency-file code blocks
+  into one commented block, collapsed the asset-filename explanation from two
+  code blocks plus two paragraphs into one paragraph, folded the
+  `check_state_file` path rule into its table row, and dropped the numbered
+  restatement of what the Usage example already shows. Prose dropped 7% (1913 to
+  1782 words excluding code blocks) with no content removed.
+- Content Overview now lists all 12 sections with a one-line gloss on what is
+  inside Reference, rather than 15 flat entries.
+- Verification:
+  - README audit script: 0 relative links, 14/14 in-page anchors resolve, every
+    `##` section present in Content Overview.
+  - Re-rendered through PyPI's `readme_renderer`: renders, zero broken anchors.
+  - `python -m build`: 0 warnings. `twine check --strict dist/*`: PASSED both.
+  - `treaty validate .`: passed. `git diff --check`: passed.
+
 ### Prepared the 0.3.0 PyPI release and made the README findable (claude-opus-5, default mode)
 
 - **Executed both threads handed off earlier today.** Everything in the repo is

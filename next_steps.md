@@ -68,6 +68,12 @@ Done on 2026-08-05, on `main`:
   `.py` files outside the frozen bundle and update only those?", and "Do I need
   code signing or an update server?" Each answer links into the section that
   covers it, and the no-signing trade-off stays as prominent as before.
+- **Restructured the README** after the maintainer read the pushed version and
+  found it unfocused. Common Questions and the folded-in tool comparison now sit
+  below Usage instead of above Installation, so the page leads with the adoption
+  path; the look-it-up material is grouped under one `## Reference`; Update Scope
+  and Safety deliberately stays in the main flow because it governs what cannot
+  ship as a source update; and the agent prompt is down from 21 lines to 7.
 
 What is left, and why it is blocked: **the maintainer needs a PyPI account.**
 Nothing else stands in the way — `python -m build` and
