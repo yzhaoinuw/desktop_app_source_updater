@@ -1,4 +1,5 @@
-﻿import dataclasses
+﻿import ast
+import dataclasses
 import hashlib
 import json
 import os
@@ -902,6 +903,107 @@ class TestStartupUpdate(unittest.TestCase):
             self.assertIn("differ from the update baseline", result.message)
             self.assertEqual("VALUE = 'local edit'\n", fixture.read_app_file("demo_src/app.py"))
 
+    def test_refuses_python_payload_that_will_not_parse(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            update_zip = fixture.build_update_zip(
+                payloads={
+                    "demo_src/__init__.py": 'VERSION = "v1.0.1"\n',
+                    "demo_src/app.py": "def broken(\n",
+                }
+            )
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("failed", result.status)
+            self.assertIn("demo_src/app.py is not valid Python", result.message)
+            # Validation runs while every payload is still staged in memory, so
+            # a bad asset must leave the whole install untouched rather than
+            # applying the files that happened to be listed before it.
+            self.assertEqual("VALUE = 'old'\n", fixture.read_app_file("demo_src/app.py"))
+            self.assertEqual('VERSION = "v1.0.0"\n', fixture.read_app_file("demo_src/__init__.py"))
+
+    def test_refuses_python_payload_containing_null_bytes(self):
+        # Null bytes raise ValueError rather than SyntaxError. run_startup_update
+        # only converts UpdateError into a result, so anything uncaught here
+        # would crash the launcher on the startup path.
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            update_zip = fixture.build_update_zip(
+                payloads={
+                    "demo_src/__init__.py": 'VERSION = "v1.0.1"\n',
+                    "demo_src/app.py": "VALUE = 'new'\x00\n",
+                }
+            )
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("failed", result.status)
+            self.assertIn("demo_src/app.py is not valid Python", result.message)
+            self.assertEqual("VALUE = 'old'\n", fixture.read_app_file("demo_src/app.py"))
+
+    def test_accepts_python_payload_with_an_encoding_declaration(self):
+        # Parsing the raw bytes honors PEP 263 the way import will. Decoding as
+        # UTF-8 first would reject a legitimate latin-1 payload.
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
+            payload = "# -*- coding: latin-1 -*-\nVALUE = 'caf\xe9'\n"
+            update_zip = fixture.release_dir / "demo_app_update_v1.0.1.zip"
+            manifest = {
+                "schema_version": 1,
+                "app": "demo_app",
+                "version": "v1.0.1",
+                "from_versions": ["v1.0.0"],
+                "changed_files": ["demo_src/__init__.py", "demo_src/app.py"],
+                "files": [
+                    {
+                        "path": "demo_src/__init__.py",
+                        "sha256": sha256(b'VERSION = "v1.0.1"\n'),
+                        "previous_sha256_by_version": {
+                            "v1.0.0": sha256(b'VERSION = "v1.0.0"\n')
+                        },
+                    },
+                    {
+                        "path": "demo_src/app.py",
+                        "sha256": sha256(payload.encode("latin-1")),
+                        "previous_sha256_by_version": {
+                            "v1.0.0": sha256(b"VALUE = 'old'\n")
+                        },
+                    },
+                ],
+            }
+            with zipfile.ZipFile(update_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("manifest.json", json.dumps(manifest))
+                zf.writestr("demo_src/__init__.py", 'VERSION = "v1.0.1"\n')
+                zf.writestr("demo_src/app.py", payload.encode("latin-1"))
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("updated", result.status)
+
+    def test_non_python_payloads_skip_syntax_validation(self):
+        with TemporaryDirectory() as temp_dir:
+            fixture = ReleaseZipFixture(temp_dir)
+            fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
+            fixture.write_app_file("demo_src/notes.txt", "old notes\n")
+            update_zip = fixture.build_update_zip(
+                payloads={
+                    "demo_src/__init__.py": 'VERSION = "v1.0.1"\n',
+                    "demo_src/notes.txt": "def broken(\n",
+                }
+            )
+
+            result = run_startup_update(fixture.config(update_zip=update_zip))
+
+            self.assertEqual("updated", result.status)
+            self.assertEqual("def broken(\n", fixture.read_app_file("demo_src/notes.txt"))
+
     def _write_config_merge_baseline(self, fixture):
         fixture.write_app_file("demo_src/__init__.py", 'VERSION = "v1.0.0"\n')
         fixture.write_app_file("demo_src/app.py", "VALUE = 'old'\n")
@@ -1022,6 +1124,78 @@ class TestConfigCompatibility(unittest.TestCase):
             and field.default_factory is dataclasses.MISSING
         ]
         self.assertEqual([], missing_defaults)
+
+
+class TestSelfUpdateSafetyContract(unittest.TestCase):
+    """The runtime modules must be fully loaded before an update is applied.
+
+    An update can overwrite the updater's own source: adopters may vendor this
+    package into the updateable source tree so that updater fixes ship as
+    ordinary source updates instead of full packaged releases. When that
+    happens the running process has already imported these modules, so the
+    swap is safe — the old code finishes the run from memory and the new code
+    takes effect on the next launch.
+
+    That safety holds only while every import completes at module load. An
+    import deferred into a function inside the apply path would execute after
+    the files on disk had already been replaced, loading new code into a
+    process running the old code. The failure would be intermittent, would
+    depend on which files a given release happened to touch, and would strike
+    during an update — the worst moment to be half-loaded.
+
+    These are the modules a launcher imports and the apply path runs through.
+    build_update_asset.py is deliberately excluded: it is a maintainer-side
+    CLI that never runs inside an installed app.
+    """
+
+    RUNTIME_MODULE_NAMES = ("__init__.py", "core.py", "python_config.py")
+
+    def _runtime_modules(self):
+        package_root = Path(core.__file__).resolve().parent
+        for name in self.RUNTIME_MODULE_NAMES:
+            path = package_root / name
+            self.assertTrue(path.is_file(), f"missing runtime module: {name}")
+            yield name, ast.parse(path.read_bytes(), filename=name)
+
+    def test_runtime_modules_have_no_deferred_imports(self):
+        deferred = []
+        for name, tree in self._runtime_modules():
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                for inner in ast.walk(node):
+                    if isinstance(inner, (ast.Import, ast.ImportFrom)):
+                        deferred.append(f"{name}:{inner.lineno}")
+
+        self.assertEqual(
+            [],
+            sorted(set(deferred)),
+            "Imports in these modules must stay at module level. A function-level "
+            "import runs after an update has already replaced files on disk, so "
+            "the process would load new code into old code mid-update.",
+        )
+
+    def test_runtime_modules_do_not_import_dynamically(self):
+        # __import__ and importlib.import_module defer a load just as a
+        # function-level import statement does, and the AST check above cannot
+        # see them.
+        dynamic = []
+        for name, tree in self._runtime_modules():
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                function = node.func
+                if (isinstance(function, ast.Name) and function.id == "__import__") or (
+                    isinstance(function, ast.Attribute) and function.attr == "import_module"
+                ):
+                    dynamic.append(f"{name}:{node.lineno}")
+
+        self.assertEqual(
+            [],
+            sorted(set(dynamic)),
+            "Dynamic imports defer module loading past the point where an "
+            "update has replaced files on disk.",
+        )
 
 
 if __name__ == "__main__":

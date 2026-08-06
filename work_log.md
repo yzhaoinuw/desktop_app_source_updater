@@ -8,6 +8,71 @@ If today's date already has a `## YYYY-MM-DD` header at the top, add a new `###`
 
 Update this log at the end of any substantive work session unless the user explicitly asks not to document it. Substantive work includes file edits, meaningful validation or debugging, technical decisions or reversals, reusable discoveries, branch/PR/release state changes, or follow-up work that future agents need. Log useful experiments even when the code was reverted; skip casual Q&A, trivial one-off commands, and pure scratch work with no future coordination value.
 
+## 2026-08-06
+
+### Groundwork and design for a self-updating updater (claude-opus-5, default mode)
+
+Maintainer's question: the updater ships as a frozen dependency inside the
+adopting app, so an updater fix needs a full packaged release — can it update
+itself? Yes. The enabler is that this package is pure Python, stdlib-only, with
+no compiled parts, so nothing forces it to live inside the bundle. Decided in
+favor, **deliberately did not start it**, and landed only the two pieces that pay
+off regardless of when it happens.
+
+- **`.py` payloads are now parsed before anything is written**
+  (`_validate_python_payload` in `core.py`, called from
+  `_prepare_update_payloads`). An asset carrying a syntax error fails the whole
+  update with every installed file untouched. The reason this is worth its own
+  check: a file with a syntax error still matches its manifest hash, so a broken
+  installation looks pristine to the next update and only fails at import time.
+  - Parses raw bytes, not decoded text, so a PEP 263 encoding declaration is
+    honored the way the interpreter will honor it — decoding as UTF-8 first would
+    reject a legitimate latin-1 payload. There is a test for that case.
+  - Catches `ValueError`, `RecursionError`, and `MemoryError` alongside
+    `SyntaxError`. Null bytes raise `ValueError`, not `SyntaxError`, and
+    `run_startup_update` converts only `UpdateError` into a result — anything
+    else would crash the launcher on the startup path. `python_config.py:255`
+    already had this defensive shape; followed it.
+  - The `python-config-merge` path already compiled its merged output, so this
+    closes the gap for ordinary replace-strategy files.
+- **`TestSelfUpdateSafetyContract` pins the no-deferred-imports contract.** Self
+  replacement is safe only because the runtime modules are fully loaded before
+  the apply path runs: the old code finishes from memory, the new code takes
+  effect next launch. A function-level import inside the apply path would execute
+  *after* the files on disk had been replaced, loading new code into a process
+  running old code — intermittently, depending on which files a release touched.
+  Checks `__init__.py`, `core.py`, `python_config.py`; excludes
+  `build_update_asset.py`, which is a maintainer-side CLI that never runs in an
+  installed app. Also rejects `__import__` and `importlib.import_module`, which
+  defer a load the same way and are invisible to the import-statement check.
+- **Design written up in `README.md` → "Updating the Updater Itself"**, marked
+  explicitly as a design rather than a shipped pattern. Four considerations, of
+  which the first is the one most likely to be missed: **a frozen copy silently
+  shadows the vendored source copy**, because PyInstaller puts its importer into
+  `sys.meta_path` ahead of the ordinary path finder. Getting that wrong
+  reproduces the exact bug the change is meant to remove, and it looks like it
+  works. The other three: the one-launch-behind property, the standing risk of
+  breaking the update channel, and that an updater upgrade must never ride in the
+  same asset as a manifest schema bump.
+- **New `next_steps.md` thread, gated.** Do not start until `fp_analysis` has
+  applied its first real source update in the field — the definition of done is
+  two apps applying a code-only update and only one has. Then fold it into the
+  full packaged release that the pin reconciliation and the schema-2 baseline
+  already require, since all three want the same release.
+- Judgment recorded for whoever picks this up: the case rests partly on the
+  updater's low churn (no code changed between 0.2.0 and 0.3.0), but this package
+  is a month old with both adoptions still in trial, so it is likely in its
+  highest-churn period. That raises both the value and the risk. Not a reason to
+  abandon the plan; a reason to re-check it when the gate opens.
+- Verification (macOS, `python3` 3.13):
+  - `python3 -m unittest discover -s tests`: 47 tests, OK (was 41).
+  - `python3 -m compileall -q desktop_app_source_updater`: clean.
+  - Mutation check on the contract test: injected `import base64` into
+    `_sha256_bytes` in `core.py`, confirmed
+    `test_runtime_modules_have_no_deferred_imports` failed with `core.py:1111`,
+    then restored the file from a scratchpad copy and confirmed the suite passes
+    and the mutation is gone. A contract test that cannot fail is not a contract.
+
 ## 2026-08-05
 
 ### Wired Trusted Publishing and corrected a claim about the pins (claude-opus-5, default mode)

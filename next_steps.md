@@ -7,6 +7,8 @@ threads that are actually in flight or likely to be resumed soon.
 
 - [Downstream adoption validation](#downstream-adoption-validation-codex-gpt-5):
   prove the updater in at least two real desktop apps before broad adoption.
+- [Self-updating updater](#self-updating-updater-claude-opus-5): decided and
+  designed; gated on the second field apply. Groundwork has landed.
 
 ## Downstream Adoption Validation (Codex GPT-5)
 
@@ -72,6 +74,56 @@ Definition of done:
   block or require packaged refreshes as intended.
 - Any lessons from downstream adoption are reflected in `README.md`,
   `AGENTS.md`, and tests where useful.
+
+## Self-Updating Updater (Claude Opus 5)
+
+Status: decided in favor, designed, and deliberately not started. The two pieces
+that are useful regardless of when the switch flips landed on 2026-08-06.
+
+**The problem.** This package ships frozen inside the packaged app next to the
+launcher, so an updater fix cannot arrive through a source update — it needs a
+full packaged release. That is a hole in the project's own premise, and it bites
+hardest at the worst moment: a broken updater is exactly when a cheap fix path is
+most wanted. This is the same fact already noted in the pin-drift item above,
+stated as a thread of its own.
+
+**The design** is written up in
+[README.md → Updating the Updater Itself](README.md#updating-the-updater-itself):
+vendor the package directory into the updateable source tree, add it to
+`allowed_payload_paths`, and let the existing machinery update it. Four
+considerations are recorded there — frozen-copy shadowing, the one-launch-behind
+property, the risk of breaking the update channel, and schema forward
+compatibility. Read that section before starting; do not re-derive it.
+
+**Landed 2026-08-06, independent of the decision:**
+
+- `.py` payloads are parsed before anything is written, so an asset carrying a
+  syntax error fails the whole update instead of installing a file that matches
+  its manifest hash and only fails at import time.
+- `TestSelfUpdateSafetyContract` pins the no-deferred-imports contract that makes
+  self-replacement safe. Verified by mutation: injecting a function-level import
+  into `core.py` fails the test.
+
+**The gate: do not start until `fp_analysis` has applied its first real source
+update in the field.** The definition of done above is two apps applying a
+code-only update; one has. Giving the updater authority over its own code before
+its ordinary path is proven twice is backwards.
+
+**When the gate opens, fold this into the full packaged release the pin
+reconciliation and the schema-2 baseline already require.** All three need the
+same release; doing them separately spends three.
+
+**The standing cost, worth restating so it is not rediscovered as an objection:**
+a broken updater still requires a full packaged release. What changes is that a
+cheap channel gains the ability to cause one. That is the trade, and it was
+accepted knowingly.
+
+**One caveat on the reasoning.** The case rests partly on low churn — no code
+changed between 0.2.0 and 0.3.0 — but this package is about a month old and both
+adoptions are still in trial, so it is likely in the highest-churn period it will
+ever see. That cuts both ways: the value of cheap updater fixes is highest now,
+and so is the risk of building a self-update channel on a codebase still moving.
+Revisit if churn stays high after the gate opens.
 
 ## Background / Paused
 

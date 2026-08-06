@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import ast
 import email.utils
 import hashlib
 import json
@@ -1021,10 +1022,42 @@ def _prepare_update_payloads(
                         ) from exc
                     except PythonConfigMergeError as exc:
                         raise UpdateError(str(exc)) from exc
+                _validate_python_payload(update_file.path, payload)
                 prepared[update_file.path] = payload
     except KeyError as exc:
         raise UpdateError(f"update zip is missing payload file: {exc.args[0]}") from exc
     return prepared
+
+
+def _validate_python_payload(path: str, payload: bytes) -> None:
+    """Refuse a .py payload that will not parse, before anything is written.
+
+    An update that installs a syntax error leaves the app unable to start on
+    the next launch, and the source tree passes its own baseline hash checks
+    afterward, so the broken file looks pristine to the next update. Parsing
+    happens while the payload is still staged in memory: a bad asset is
+    reported as a failed check and every installed file is left untouched.
+
+    This is cheap insurance now and load-bearing later, when the updater
+    itself ships as updateable source and a syntax error could break the
+    channel that would otherwise deliver its own fix.
+    """
+    if not path.lower().endswith(".py"):
+        return
+    try:
+        # Bytes rather than decoded text, so a PEP 263 encoding declaration is
+        # honored the same way the interpreter will honor it at import time.
+        ast.parse(payload, filename=path)
+    except SyntaxError as exc:
+        location = f"line {exc.lineno}" if exc.lineno else "unknown line"
+        raise UpdateError(
+            f"update payload {path} is not valid Python: {exc.msg} ({location})"
+        ) from exc
+    except (ValueError, RecursionError, MemoryError) as exc:
+        # Null bytes and pathologically nested source raise these instead.
+        # They must not escape: run_startup_update only converts UpdateError
+        # into a result, so anything else would crash the launcher at startup.
+        raise UpdateError(f"update payload {path} is not valid Python: {exc}") from exc
 
 
 def _apply_update_package(

@@ -19,7 +19,7 @@ launcher beside plain, updateable source files can use it.
 - [Build and Publish an Update](#build-and-publish-an-update)
 - [Update Scope and Safety](#update-scope-and-safety)
 - [Reference](#reference) — release checks, multiple baselines, config merging,
-  verification, troubleshooting, development
+  updating the updater, verification, troubleshooting, development
 - [Adopting This in an App](#adopting-this-in-an-app)
 - [Citation](#citation)
 - [Acknowledgment](#acknowledgment)
@@ -237,6 +237,13 @@ transaction. The updater also blocks payload paths outside
 `allowed_payload_paths` and rejects dependency, packaging, build, cache, archive,
 and local-data paths.
 
+Every `.py` payload is parsed before anything is written, so an asset carrying a
+syntax error fails the whole update and leaves the installation untouched. This
+matters because the damage would otherwise be quiet: a file with a syntax error
+still matches its manifest hash, so the broken installation looks pristine to the
+next update and only fails at import time. Payloads are parsed as raw bytes, so a
+PEP 263 encoding declaration is honored the way the interpreter will honor it.
+
 ## Reference
 
 Details worth looking up once an integration is working.
@@ -323,6 +330,69 @@ entire update before mutation.
 
 The adopting app must first ship a full release containing a schema-2-compatible
 updater; older packaged updaters reject schema-2 assets.
+
+### Updating the Updater Itself
+
+**This is a design, not a shipped pattern.** Nothing in the package requires it
+today, and no adopter runs it yet. It is recorded here so the trade-offs are
+settled before anyone builds it; see `next_steps.md` for the gate on when.
+
+In the arrangement described under [Usage](#usage), this package is a dependency
+frozen into the packaged app alongside the launcher. That means an updater fix
+cannot arrive through a source update — the one kind of change this project
+exists to make cheap requires a full packaged release, which is a hole in its own
+premise. It bites hardest at the worst moment, because a broken updater is
+exactly when a cheap fix path is most wanted.
+
+Nothing forces that. This package is pure Python with no compiled parts and no
+dependencies outside the standard library, so it can live in the updateable
+source tree instead of inside the bundle:
+
+```text
+InstalledApp/
+|- launcher.exe                       # frozen, stable, rarely changes
+|- _updater/
+|  `- desktop_app_source_updater/     # plain .py, updateable
+`- my_app_src/                        # plain .py, updateable
+```
+
+The launcher puts `_updater/` on `sys.path` before importing, and
+`allowed_payload_paths` gains `_updater/desktop_app_source_updater/`. The updater
+then updates itself through the machinery it already has: manifest-listed,
+baseline-hash verified, atomically applied, rolled back on failure. Its version
+rides with the app version, so no separate version stream is needed and
+`minimum_version` keeps working as the compatibility gate. Vendor the package
+directory only — `pyproject.toml` is a blocked path name.
+
+Four things decide whether this works:
+
+1. **A frozen copy silently shadows the source copy.** PyInstaller installs its
+   importer into `sys.meta_path` ahead of the ordinary path finder, so if
+   `desktop_app_source_updater` is *also* frozen into the bundle, the frozen one
+   wins and the vendored copy is dead code that looks live. Exclude it from the
+   spec, or vendor it under a distinct name, and verify which one loaded rather
+   than assuming.
+2. **An updater fix is always one launch behind.** The running updater is already
+   in memory when it overwrites its own files, so the new code takes effect on the
+   next launch. That is safe rather than torn — but only because every import in
+   the runtime modules happens at module load. `TestSelfUpdateSafetyContract` in
+   `tests/test_core.py` enforces that; a function-level import in the apply path
+   would load new code into a process running old code, mid-update.
+3. **A bad updater can break its own update channel.** This is the real cost, and
+   it does not go away. A broken updater still needs a full release; what changes
+   is that a cheap channel can now cause one. The `.py` parse check above is the
+   first mitigation. The second is a recovery floor: a minimal frozen copy under a
+   different module name that the launcher falls back to when the vendored one
+   will not import. Something must be the stable floor — the win is that the floor
+   shrinks from the whole updater to a few dozen lines that change almost never.
+4. **Manifest schema bumps break forward.** An older field updater meeting a newer
+   schema fails with an unsupported-schema error. Since the updater's own upgrade
+   arrives *as* a manifest, the asset that carries it must be readable by the
+   oldest updater still installed, so an updater upgrade must never ride in the
+   same asset as a schema bump.
+
+Items 1, 2, and 4 are one-time implementation work. Item 3 is a standing trade:
+cheaper updater fixes in exchange for a cheaper way to break the updater.
 
 ### Verifying an Integration
 
