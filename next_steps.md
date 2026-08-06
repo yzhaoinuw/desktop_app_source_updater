@@ -101,14 +101,19 @@ when the tag and `pyproject.toml` disagree, and publishes through
 manual run builds and checks without uploading, so the workflow can be exercised
 without spending a version number; that dry run passed on 2026-08-05.
 
-**It does not work until the maintainer adds the publisher on PyPI**, which only
-they can do — <https://pypi.org/manage/project/desktop-app-source-updater/settings/publishing/>,
-with owner `yzhaoinuw`, repository `desktop_app_source_updater`, workflow
-`release.yml`, and environment `pypi`. The environment name must match the
-workflow exactly or the upload is rejected. Until that entry exists, a tag push
-builds fine and fails at the publish step.
+The maintainer added the matching publisher on PyPI the same day (owner
+`yzhaoinuw`, repository `desktop_app_source_updater`, workflow `release.yml`,
+environment `pypi`), so releasing should now be
+`git tag vX.Y.Z && git push origin vX.Y.Z`.
 
-Once configured, releasing is `git tag vX.Y.Z && git push origin vX.Y.Z`. The
-0.3.0 upload showed the manual token step is where the friction actually was,
+**The OIDC handshake itself is still unexercised**, because nothing
+package-relevant changed after v0.3.0 and manufacturing a version purely to test
+the pipeline would spend a PyPI version permanently. The next real release is the
+first true test. If the publisher entry is wrong, the failure is loud and cheap:
+the `publish` job fails at upload, no version number is consumed, and re-running
+the same workflow run after fixing the PyPI entry is enough. Nothing needs
+re-tagging.
+
+The 0.3.0 upload showed the manual token step is where the friction actually was,
 between the missing TTY under a `!`-prefixed command and a stubbed `.pypirc`
 silently beating the interactive prompt.
