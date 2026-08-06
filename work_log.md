@@ -10,6 +10,60 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-08-05
 
+### Added CI and corrected a stale downstream thread (claude-opus-5, default mode)
+
+- **Added `.github/workflows/tests.yml`** — the repo's first CI. Runs the suite
+  on Linux, Windows, and macOS across Python 3.10–3.13, plus a `build` and
+  `twine check --strict` job. All 12 matrix jobs and the package job passed on
+  the first run (`gh run 31063168274`).
+- **Why this and not the Trusted Publishing workflow first:** `pyproject.toml`
+  advertises four Python versions and `Operating System :: OS Independent` on a
+  now-public PyPI page, and nothing verified any of it — this package had only
+  ever run on 3.13 here and one Windows conda env, and **Linux had never run the
+  tests at all**. The OS classifier was one I added during the 0.3.0 prep, so it
+  was an assertion made on the maintainer's behalf. CI turns it into a fact.
+  Trusted Publishing saves a few minutes a few times a year; it is convenience,
+  not correctness. It is also easier to add now that a workflow directory exists.
+- The code turned out to be portable by construction — `os.replace`, explicit
+  `utf-8` on every read, backslash normalization for path comparison, and no
+  `sys.platform` branches anywhere — which is why the matrix went green with no
+  fixes.
+- **Corrected the Downstream Adoption Validation thread, which was materially
+  wrong on `main`.** It listed "wire the updater into the `fp_analysis` launcher"
+  as remaining work; that landed in `fp_analysis` on 2026-07-24 (`f4803dd`), and
+  the durable-check adoption on 2026-07-28 (`2d7e640`) — the *same day* as this
+  repo's last edit to that thread (`22475b7`). The bullet that commit *added*
+  about `check_state_file`, `latest_release_url`, and `force_check` was already
+  satisfied in `fp_analysis` on the day it was written.
+- **Root cause, and the fix applied:** this repo was duplicating a checklist that
+  the adopting repos already maintain. Both `sleep_scoring` and `fp_analysis`
+  have their own `next_steps.md` — `fp_analysis`'s is accurate and even has a
+  "First Source-Update Release Trial" thread covering the real remaining step.
+  The thread here now records only updater-level facts and links out to each
+  app's own checklist. One source of truth per fact.
+- **Verified field evidence directly from published releases rather than from
+  this repo's notes.** `sleep_scoring` v0.16.8 carries a real
+  `sleep_scoring_app_update_v0.16.8.zip`, so its apply path is genuinely proven.
+  `fp_analysis` is fully integrated with its v0.6.0 baseline shipped, but every
+  one of its releases carries only a ~117 MB `*_full.zip` — nothing matching its
+  own `fp_analysis_app_update_` prefix, so it has never applied one. Definition
+  of done is one of two apps, not two.
+- **Found drifted and inconsistent downstream pins.** `sleep_scoring` pins two
+  different things: `pyproject.toml` uses `@main` — a moving target that now
+  resolves to 0.3.0 and will keep moving — while `requirements.txt` pins
+  `5eab40b`. `fp_analysis` pins `85bb68e`. A moving `@main` reference is exactly
+  what the `UpdateConfig` field-order contract warns against, since a positional
+  caller misbinds silently instead of failing. Recorded as the top remaining item.
+- Verification:
+  - `gh run view 31063168274`: 12/12 matrix jobs plus `package`, all success.
+  - Workflow YAML parsed with `yaml.safe_load` before pushing; grepped for
+    3.11+/3.12+-only constructs (`tomllib`, `typing.Self`, `ExceptionGroup`,
+    PEP 695 generics) — none present, so the 3.10 floor is real.
+  - Adoption claims checked against `gh release view` asset lists in both
+    adopting repos, and against `origin/main` in `fp_analysis` rather than the
+    local checkout, which was 3 commits behind.
+  - `treaty validate .`: passed.
+
 ### Published 0.3.0 to PyPI, tagged, and released (claude-opus-5, default mode)
 
 - **The package is on PyPI**:

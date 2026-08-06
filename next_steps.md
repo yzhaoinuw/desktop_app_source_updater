@@ -74,13 +74,20 @@ package index — was decided in favor of a package index and **shipped on
 2026-08-05**: 0.3.0 is on PyPI, tagged, released, and archived on Zenodo. See
 the work log entries for that date.
 
-Still paused, and genuinely not urgent: whether to add a formatter, a linter, or
-a CI workflow.
+CI landed on 2026-08-05: `.github/workflows/tests.yml` runs the suite on Linux,
+Windows, and macOS across Python 3.10 to 3.13, and builds and `twine check`s the
+distribution on every push. All 12 matrix jobs passed on the first run. This
+matters mainly because the PyPI page advertises those four Python versions and
+`Operating System :: OS Independent`, and nothing had verified them — Linux had
+never run these tests at all.
 
-The one thing that would make the next release meaningfully easier is **Trusted
-Publishing**, which removes API tokens from the process entirely — PyPI is
-configured to trust a specific repository and workflow, and the workflow uploads
-without a stored secret. It needs a GitHub Actions workflow to exist, and this
-project has none. Worth doing before the release after next, when the manual
-token dance would otherwise repeat; the 0.3.0 upload showed that step is where
-the friction actually is.
+Still paused, and genuinely not urgent: whether to add a formatter or a linter.
+
+The remaining piece is **Trusted Publishing**, which removes API tokens from
+releases entirely — PyPI is configured to trust a specific repository and
+workflow, and that workflow uploads without a stored secret. The blocker is gone
+now that a workflow directory exists; it needs a release workflow triggered on
+tag push, plus a one-time pending-publisher entry on PyPI. Worth doing before the
+next release: the 0.3.0 upload showed the manual token step is where the friction
+actually is, between the missing TTY under `!` and a stubbed `.pypirc` silently
+beating the interactive prompt.
