@@ -64,8 +64,43 @@ off regardless of when it happens.
   is a month old with both adoptions still in trial, so it is likely in its
   highest-churn period. That raises both the value and the risk. Not a reason to
   abandon the plan; a reason to re-check it when the gate opens.
+- **Added `__version__` to the package**, found while walking the maintainer
+  through what vendoring would look like in `sleep_scoring`. The package had no
+  version marker anywhere in its source — the version lived only in
+  `pyproject.toml:7`, which is a blocked path name and would not be vendored, so
+  a vendored updater would have been completely unidentifiable in the field. On
+  the critical path for the design and invisible until a bug report arrives.
+  - `pyproject.toml` stays the static packaging source of truth rather than
+    becoming `dynamic`, because `release.yml:22` reads it with `tomllib` to
+    refuse a mismatched tag. Making it dynamic would have broken that check on a
+    branch that is out for review.
+  - `TestVersionConsistency` ties `__version__`, `pyproject.toml`, and
+    `CITATION.cff` together, since AGENTS.md already requires updating the last
+    two on release and this adds a third hand-edited copy of one string. Uses
+    `tomllib` with a regex fallback: CI runs 3.10, which has no `tomllib`.
+  - Verified by mutation: setting `__version__ = "9.9.9"` fails the test, then
+    restored.
+  - **Trap for anyone repeating that mutation check:** the restore appeared to
+    fail, because `"9.9.9"` and `"0.3.0"` are the same byte length and the
+    restore landed in the same second as the mutation, so the `.pyc`'s
+    `(mtime, size)` invalidation key still matched and Python reused the stale
+    9.9.9 module. The source file was correct the whole time. Run mutation
+    checks with `python3 -B`, or clear `__pycache__` before re-verifying.
+    This does **not** affect real updates: `os.replace` gives the applied file
+    an mtime of now, while the file it replaces was written at install time, so
+    the key differs. It only bites same-size edits seconds apart.
+- Reusable point: grounding the design question in the actual adopter was worth
+  more than reasoning about it abstractly. `sleep_scoring`'s spec already keeps
+  `app_src` out of the bundle by filtering `a.pure`/`a.scripts`
+  (`packaging/windows/app.spec:47-49`), so the "keep the updater unfrozen"
+  mechanism is a proven in-repo pattern rather than something new — and
+  `app.spec:36` currently forces the updater *into* the bundle via
+  `hiddenimports`, which is exactly the shadowing hazard the README warns about.
+  Its launcher also already wraps the updater import in `try/except ImportError`
+  and continues startup, which is half of the recovery floor the design calls
+  for. None of that was visible from this repo alone.
 - Verification (macOS, `python3` 3.13):
-  - `python3 -m unittest discover -s tests`: 47 tests, OK (was 41).
+  - `python3 -m unittest discover -s tests`: 49 tests, OK (was 41).
   - `python3 -m compileall -q desktop_app_source_updater`: clean.
   - Mutation check on the contract test: injected `import base64` into
     `_sha256_bytes` in `core.py`, confirmed

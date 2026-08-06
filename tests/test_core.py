@@ -3,6 +3,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import socket
 import threading
 import time
@@ -14,6 +15,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import desktop_app_source_updater
 from desktop_app_source_updater import UpdateConfig, run_startup_update
 from desktop_app_source_updater import core
 
@@ -1124,6 +1126,48 @@ class TestConfigCompatibility(unittest.TestCase):
             and field.default_factory is dataclasses.MISSING
         ]
         self.assertEqual([], missing_defaults)
+
+
+class TestVersionConsistency(unittest.TestCase):
+    """The package version is declared in three places and must agree.
+
+    `pyproject.toml` is the packaging source of truth — `release.yml` reads it
+    to refuse a tag that disagrees. `CITATION.cff` carries it for Zenodo, and
+    AGENTS.md already requires updating both on release. `__version__` is the
+    only one of the three that survives into an installed app: a vendored copy
+    of this package ships the package directory without `pyproject.toml`, so
+    it is what a field bug report can report.
+
+    Three hand-edited copies of one string is exactly the drift this repo
+    guards against elsewhere, so the release ritual fails loudly here instead
+    of shipping a version that lies about itself.
+    """
+
+    REPO_ROOT = Path(__file__).resolve().parent.parent
+
+    def _pyproject_version(self):
+        pyproject = self.REPO_ROOT / "pyproject.toml"
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python 3.10 has no tomllib.
+            match = re.search(
+                r"^version\s*=\s*[\"']([^\"']+)[\"']",
+                pyproject.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            self.assertIsNotNone(match, "could not find a version in pyproject.toml")
+            return match.group(1)
+        with pyproject.open("rb") as handle:
+            return tomllib.load(handle)["project"]["version"]
+
+    def test_dunder_version_matches_pyproject(self):
+        self.assertEqual(self._pyproject_version(), desktop_app_source_updater.__version__)
+
+    def test_citation_version_matches_pyproject(self):
+        text = (self.REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+        match = re.search(r"^version:\s*[\"']?([^\"'\s]+)", text, re.MULTILINE)
+        self.assertIsNotNone(match, "could not find a version in CITATION.cff")
+        self.assertEqual(self._pyproject_version(), match.group(1))
 
 
 class TestSelfUpdateSafetyContract(unittest.TestCase):

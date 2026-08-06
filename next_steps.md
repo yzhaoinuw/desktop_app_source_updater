@@ -103,6 +103,10 @@ compatibility. Read that section before starting; do not re-derive it.
 - `TestSelfUpdateSafetyContract` pins the no-deferred-imports contract that makes
   self-replacement safe. Verified by mutation: injecting a function-level import
   into `core.py` fails the test.
+- `__version__` now exists on the package. It did not before — the version lived
+  only in `pyproject.toml`, which a vendored copy does not ship, so a vendored
+  updater would have been unidentifiable in the field. `TestVersionConsistency`
+  keeps it in step with `pyproject.toml` and `CITATION.cff`.
 
 **The gate: do not start until `fp_analysis` has applied its first real source
 update in the field.** The definition of done above is two apps applying a

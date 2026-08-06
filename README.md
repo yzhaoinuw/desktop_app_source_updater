@@ -364,6 +364,11 @@ rides with the app version, so no separate version stream is needed and
 `minimum_version` keeps working as the compatibility gate. Vendor the package
 directory only — `pyproject.toml` is a blocked path name.
 
+Because that leaves the vendored copy without packaging metadata,
+`desktop_app_source_updater.__version__` is what identifies it in the field.
+Log it from the launcher; it is the only way a bug report can say which updater
+was actually running.
+
 Four things decide whether this works:
 
 1. **A frozen copy silently shadows the source copy.** PyInstaller installs its
