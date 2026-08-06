@@ -10,12 +10,24 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-08-05
 
-### Uploaded 0.3.0 to TestPyPI and cut the v0.3.0 release (claude-opus-5, default mode)
+### Published 0.3.0 to PyPI, tagged, and released (claude-opus-5, default mode)
 
-- **0.3.0 is live on TestPyPI**:
-  <https://test.pypi.org/project/desktop-app-source-updater/>. Tagged `v0.3.0`
-  and cut the matching GitHub Release. The PyPI upload itself is the only step
-  left, and it needs the maintainer's account.
+- **The package is on PyPI**:
+  <https://pypi.org/project/desktop-app-source-updater/>. `v0.3.0` is tagged at
+  `25836b2`, the GitHub Release is published, and Zenodo archived it as record
+  `21815913`; the concept DOI `10.5281/zenodo.21763329` now resolves to it. The
+  `Publish to PyPI` thread in `next_steps.md` is closed and removed.
+- Sequence used: TestPyPI dry run
+  (<https://test.pypi.org/project/desktop-app-source-updater/>), then tag and
+  GitHub Release, then PyPI. Tagging before the PyPI upload was deliberate — the
+  README's own `git+...@v0.3.0` install example is part of the PyPI project page,
+  so publishing first would have shipped a page containing a command that
+  errored. Building from the tagged tree also guarantees the uploaded sdist
+  matches `v0.3.0` exactly.
+- Verified from PyPI after upload: clean-venv `pip install` reports `0.3.0` with
+  no dependencies, `desktop-app-source-update-asset` is on the path and runs, and
+  the JSON API shows all four project URLs, 5 keywords, 10 classifiers,
+  `License-Expression: MIT`, and a 16 KB `text/markdown` description.
 - **Zero code changed between v0.2.0 and v0.3.0.** `desktop_app_source_updater/`
   does not appear in `git diff v0.2.0..HEAD` at all — this release is packaging
   metadata and documentation only, so downstream apps pinned to 0.2.0 can move
