@@ -10,6 +10,42 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-08-05
 
+### Wired Trusted Publishing and corrected a claim about the pins (claude-opus-5, default mode)
+
+- **Added `.github/workflows/release.yml`.** Builds on a `v*` tag push, refuses
+  to continue when the tag and `pyproject.toml` version disagree, and publishes
+  via `pypa/gh-action-pypi-publish` with `id-token: write` — an OIDC token, no
+  stored secret. `workflow_dispatch` builds and checks without uploading, since
+  `publish` is gated on `startsWith(github.ref, 'refs/tags/v')`. Dry run
+  `gh run 31063742071`: `build` success, `publish` correctly skipped.
+- **Still needs the maintainer's one-time PyPI entry** at the project's
+  publishing settings: owner `yzhaoinuw`, repo `desktop_app_source_updater`,
+  workflow `release.yml`, environment `pypi`. Because the project already exists
+  on PyPI this is a normal trusted publisher, not a "pending" one, and the
+  environment name must match the workflow exactly.
+- **Corrected an inaccurate claim I had put in `next_steps.md` earlier today.**
+  I wrote that `sleep_scoring`'s `@main` pin was "exactly what the `UpdateConfig`
+  field-order contract warns against, since a positional caller misbinds
+  silently." That is wrong for both current adopters: `sleep_scoring`
+  (`run_desktop_app.py:132`) and `fp_analysis` (`startup_update_config.py`) each
+  construct `UpdateConfig` entirely with keyword arguments, so inserting a field
+  would not misbind for them. The pin problem is real but it is about
+  **reproducibility**, not misbinding — a package built from `@main` carries no
+  record of which updater it froze, and since launcher and updater both live
+  inside the frozen bundle, a wrong one needs a full packaged release to fix
+  rather than a source update. Rewrote the bullet accordingly.
+- Reusable point for future sessions: the field-order contract in `AGENTS.md` is
+  a guard against a hazard no adopter is currently exposed to. That does not make
+  it pointless — it is what keeps keyword-only usage from being accidental — but
+  do not cite it as an active risk without checking how the adopter actually
+  constructs the config.
+- Verification:
+  - `yaml.safe_load` on `release.yml` before pushing; confirmed the publish gate,
+    `id-token: write`, and `environment: pypi`.
+  - `gh run view 31063742071`: build success, publish skipped, as designed.
+  - `grep -A 20 "UpdateConfig("` in both adopting repos: all keyword arguments.
+  - `treaty validate .`: passed.
+
 ### Added CI and corrected a stale downstream thread (claude-opus-5, default mode)
 
 - **Added `.github/workflows/tests.yml`** — the repo's first CI. Runs the suite
