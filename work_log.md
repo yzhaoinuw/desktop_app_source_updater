@@ -10,6 +10,50 @@ Update this log at the end of any substantive work session unless the user expli
 
 ## 2026-08-05
 
+### Uploaded 0.3.0 to TestPyPI and cut the v0.3.0 release (claude-opus-5, default mode)
+
+- **0.3.0 is live on TestPyPI**:
+  <https://test.pypi.org/project/desktop-app-source-updater/>. Tagged `v0.3.0`
+  and cut the matching GitHub Release. The PyPI upload itself is the only step
+  left, and it needs the maintainer's account.
+- **Zero code changed between v0.2.0 and v0.3.0.** `desktop_app_source_updater/`
+  does not appear in `git diff v0.2.0..HEAD` at all — this release is packaging
+  metadata and documentation only, so downstream apps pinned to 0.2.0 can move
+  up with no behavioral risk and no `UpdateConfig` field-order concern.
+- **Self-inflicted 403 worth not repeating: never write a `~/.pypirc` with
+  placeholder credentials.** I created one to save the maintainer a step, and
+  twine reads that file *instead of* prompting — so it sent the literal string
+  `PASTE_YOUR_TESTPYPI_TOKEN_HERE` as the token and TestPyPI returned 403
+  Forbidden with no prompt shown. Deleting the file fixed it immediately. An
+  absent `.pypirc` is strictly better than a stubbed one, because twine falls
+  back to an interactive prompt.
+- **Credentialed uploads cannot run through Claude Code's `!` prefix.** There is
+  no TTY, so `getpass` raises `EOFError` and twine dies before uploading. They
+  have to run in a real terminal. This cost a round trip before the `.pypirc`
+  problem was even visible.
+- **Dropped, then reinstated, the TestPyPI step.** After the 403 I proposed
+  skipping TestPyPI to halve the account setup; the maintainer clarified the
+  objection was to the broken instructions, not the step. TestPyPI did its job —
+  it confirmed the project page renders correctly before anything irreversible
+  reached PyPI.
+- **Condensed the README opening from two paragraphs to one** at the
+  maintainer's request, 85 words to 60. Kept every term the page needs to be
+  found for — PyInstaller (twice, deliberately), frozen, GitHub Release,
+  packaged, launcher — and folded the pain into the first sentence rather than
+  giving it a paragraph. Cut the sentence about verifying and atomically
+  replacing files; that claim now lives only in `## Update Scope and Safety` and
+  the trust-model question, not in the search snippet.
+- Consequence noted at the time: the TestPyPI page is one paragraph behind what
+  will go to PyPI, and neither index accepts a re-upload of an existing version.
+  Not worth a version bump, since the rendering pipeline was already validated.
+- Verification:
+  - `twine upload --repository testpypi dist/*`: succeeded from a real terminal.
+  - `python -m build`: 0 warnings. `twine check --strict dist/*`: PASSED both.
+  - README re-rendered through PyPI's `readme_renderer` after the opening
+    rewrite: renders, 0 broken anchors.
+  - `treaty validate .`: passed.
+  - `git diff v0.2.0..HEAD --stat`: no files under `desktop_app_source_updater/`.
+
 ### Restructured the README around the adoption path (claude-opus-5, default mode)
 
 - **Maintainer's read of the pushed README: it felt unfocused**, despite the

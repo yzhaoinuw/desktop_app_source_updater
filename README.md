@@ -4,14 +4,10 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21763329.svg)](https://doi.org/10.5281/zenodo.21763329)
 
 `desktop_app_source_updater` lets a packaged Python desktop app update its own
-source code from a GitHub Release, without rebuilding or reinstalling the app. It
-verifies the release and the installed files, then atomically replaces only the
-source paths you allow.
-
-It was built for apps frozen with PyInstaller, where shipping a one-line fix
-otherwise means rebuilding the bundle and redistributing the installer. Nothing
-in the package depends on PyInstaller: it works for any Python desktop app that
-ships a stable launcher beside plain, updateable source files.
+source code from a GitHub Release, so a one-line fix doesn't mean rebuilding and
+redistributing the whole app. It was built for apps frozen with PyInstaller but
+depends on nothing from PyInstaller — any Python desktop app that ships a stable
+launcher beside plain, updateable source files can use it.
 
 ## Content Overview
 
